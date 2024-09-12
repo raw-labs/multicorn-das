@@ -147,7 +147,7 @@ setup(
     name='multicorn_das',
     use_scm_version=True,  # Automatically use the Git version
     setup_requires=['setuptools_scm'],
-    packages=find_packages(include=['com','multicorn_das'],exclude=['licenses', 'downloaded']),  # Exclude non-package folders
+    packages=["com", "com.rawlabs", "com.rawlabs.protocol", "com.rawlabs.protocol.raw", "com.rawlabs.protocol.das", "com.rawlabs.protocol.das.services", "multicorn_das"],
     exclude_package_data={
         '': ['licenses/*', 'downloaded/*'],  # Exclude any files in these folders
     },
