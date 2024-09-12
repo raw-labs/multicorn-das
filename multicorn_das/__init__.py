@@ -118,7 +118,7 @@ class DASFdw(ForeignDataWrapper):
 
         grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys) if sortkeys else None
 
-        grpc_limit = None
+        grpc_limit = int(limit) if limit else None
 
         # Create an ExecuteRequest message
         request = ExecuteRequest(
