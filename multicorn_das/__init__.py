@@ -4,17 +4,20 @@ from multicorn import *
 from multicorn.utils import log_to_postgres
 from datetime import datetime, date, time
 from decimal import Decimal
-from logging import ERROR, DEBUG, INFO, WARNING
+from logging import DEBUG, INFO, WARNING # Never use ERROR or CRITICAL in log_to_post as it relaunches an exception
 
 from com.rawlabs.protocol.das.services.tables_service_pb2 import GetDefinitionsRequest, GetRelSizeRequest, CanSortRequest, GetPathKeysRequest, ExecuteRequest, UniqueColumnRequest, InsertRequest, UpdateRequest, DeleteRequest
 from com.rawlabs.protocol.das.services.registration_service_pb2 import RegisterRequest
+from com.rawlabs.protocol.das.services.health_service_pb2 import HealthCheckRequest
 from com.rawlabs.protocol.das.das_pb2 import DASId, DASDefinition
 from com.rawlabs.protocol.das.tables_pb2 import TableId, SortKeys as DASSortKeys, SortKey as DASSortKey, Qual as DASQual, SimpleQual as DASSimpleQual, ListQual as DASListQual, Operator, Equals, NotEquals, LessThan, LessThanOrEqual, GreaterThan, GreaterThanOrEqual, Row
 from com.rawlabs.protocol.das.services.tables_service_pb2_grpc import TablesServiceStub
 from com.rawlabs.protocol.das.services.registration_service_pb2_grpc import RegistrationServiceStub
+from com.rawlabs.protocol.das.services.health_service_pb2_grpc import HealthCheckServiceStub
 from com.rawlabs.protocol.raw.values_pb2 import *
 
 import grpc
+import time
 
 class DASFdw(ForeignDataWrapper):
 
@@ -31,11 +34,76 @@ class DASFdw(ForeignDataWrapper):
 
         self.das_id = DASId(id=fdw_options['das_id'])
         self.table_id = TableId(name=fdw_options['das_table_name'])
+
+        # This is only used by re__register_das
+        self.fdw_options = fdw_options
         
         # Set the startup cost for ForeignDataWrapper plugin to use.
         self._startup_cost = int(fdw_options.get('das_startup_cost', '20'))
         
         log_to_postgres(f'Initialized DASFdw with DAS ID: {self.das_id.id}, Table ID: {self.table_id.name}', DEBUG)
+
+
+    # This is used for crash recovery.
+    # First off, it will wait for the server to come back alive if it's a server unavailable error.
+    # Then, it will re-register the DAS if it was not defined in fdw_options.
+    def __crash_recovery(self, e):
+
+        # First wait for server to come back alive if it's a server unavailable error
+        attempts = 30
+        while True:
+            if not isinstance(e, grpc.RpcError):
+                # Not a grpc error, so propagate it
+                raise e
+            elif e.code() == grpc.StatusCode.UNAVAILABLE:
+                # Wait for server to be available again
+                log_to_postgres(f'Server unavailable, retrying...', WARNING)
+                time.sleep(0.5)
+                attempts -= 1
+
+                self.health_service = HealthCheckServiceStub(self.channel)
+                try:
+                    response = self.health_service.Check(HealthCheckRequest())
+                    # If we reach here, the server is available again
+                    break
+                except Exception as ex:
+                    log_to_postgres(f'Error in health_service.Check: {e}', WARNING)
+                    e = ex
+                    attempts -= 1
+                    if attempts == 0:
+                        # Give up after attempts are exhausted
+                        raise e
+            else:
+                # Not a server unavailable error
+                break
+
+        # Now that the server is available, there are two options:
+        # - either the DAS was defined in fdw_options, in which case there's nothing for us to do;
+        # - or the DAS was not defined, in which case we need to re-register the DAS with the same settings as before.
+        if 'das_type' not in self.fdw_options:
+            # Nothing more to do; we recovered from a server unavailable error
+            return
+
+        log_to_postgres(f'Re-registering DAS with type: {self.fdw_options["das_type"]}', DEBUG)
+
+        registration_service = RegistrationServiceStub(self.channel)
+
+        das_definition = DASDefinition(
+            type=self.fdw_options['das_type'],
+            options=self.fdw_options
+        )
+
+        # Pass the same DAS ID as before
+        request = RegisterRequest(definition=das_definition, id=self.das_id)
+
+        try:
+            registration_service.Register(request)
+        except Exception as e:
+            log_to_postgres(f'Error in registration_service.Register: {e}', WARNING)
+            raise e
+        
+        log_to_postgres(f'Re-registered DAS with ID: {self.das_id.id}', DEBUG)
+
 
     def get_rel_size(self, quals, columns):
         log_to_postgres(f'Getting rel size for table {self.table_id} with quals: {quals}, columns: {columns}', DEBUG)
@@ -53,12 +121,13 @@ class DASFdw(ForeignDataWrapper):
         try:
             response = self.table_service.GetRelSize(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.GetRelSize for table {self.table_id}: {e}', ERROR)
-            raise e
+            log_to_postgres(f'Error in table_service.GetRelSize for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.get_rel_size(quals, columns)
 
         log_to_postgres(f'Got rel size: {response.rows} rows, {response.bytes} bytes for table {self.table_id}', DEBUG)
-
         return (response.rows, response.bytes)
+
 
     def can_sort(self, sortkeys):
         log_to_postgres(f'Checking if can sort for table {self.table_id} with sortkeys: {sortkeys}', DEBUG)
@@ -77,8 +146,9 @@ class DASFdw(ForeignDataWrapper):
         try:
             response = self.table_service.CanSort(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.CanSort for table {self.table_id}: {e}', ERROR)
-            raise e
+            log_to_postgres(f'Error in table_service.CanSort for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.can_sort(sortkeys)
         
         log_to_postgres(f'Can sort: {response} for table {self.table_id}', DEBUG)
 
@@ -99,8 +169,9 @@ class DASFdw(ForeignDataWrapper):
         try:
             response = self.table_service.GetPathKeys(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.GetPathKeys for table {self.table_id}: {e}', ERROR)
-            raise e
+            log_to_postgres(f'Error in table_service.GetPathKeys for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.get_path_keys()
         
         log_to_postgres(f'Got path keys: {response.pathKeys} for table {self.table_id}', DEBUG)
 
@@ -135,8 +206,9 @@ class DASFdw(ForeignDataWrapper):
         try:
             rows_stream = self.table_service.Execute(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.Execute for table {self.table_id}: {e}', ERROR)
-            raise e
+            log_to_postgres(f'Error in table_service.Execute for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.execute(quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
 
         # Iterate over the streamed responses and generate multicorn rows
         for chunk in rows_stream:
@@ -161,9 +233,10 @@ class DASFdw(ForeignDataWrapper):
         try:
             response = self.table_service.UniqueColumn(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.UniqueColumns for table {self.table_id}: {e}', ERROR)
-            raise e
-        
+            log_to_postgres(f'Error in table_service.UniqueColumns for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.rowid_column()
+
         log_to_postgres(f'Got unique column: {response.column} for table {self.table_id}', DEBUG)
 
         return response.column
@@ -188,9 +261,9 @@ class DASFdw(ForeignDataWrapper):
         try:
             response = self.table_service.Insert(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.Insert for table {self.table_id}: {e}', ERROR)
-            raise e
-        
+            log_to_postgres(f'Error in table_service.Insert for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.insert(values)
 
         output_row = {}
         for name, value in response.row.data.items():
@@ -225,8 +298,9 @@ class DASFdw(ForeignDataWrapper):
         try:
             response = self.table_service.Update(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.Update for table {self.table_id}: {e}', ERROR)
-            raise e
+            log_to_postgres(f'Error in table_service.Update for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.update(rowid, new_values)
         
         output_row = {}
         for name, value in response.row.data.items():
@@ -251,9 +325,10 @@ class DASFdw(ForeignDataWrapper):
         try:
             self.table_service.Delete(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.Delete for table {self.table_id}: {e}', ERROR)
-            raise e
-        
+            log_to_postgres(f'Error in table_service.Delete for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.delete(rowid)
+
         log_to_postgres(f'Deleted row: {rowid} from table {self.table_id}', DEBUG)
 
 
@@ -290,7 +365,7 @@ class DASFdw(ForeignDataWrapper):
                 try:
                     das_id = registration_service.Register(request)
                 except Exception as e:
-                    log_to_postgres(f'Error in registration_service.Register: {e}', ERROR)
+                    log_to_postgres(f'Error in registration_service.Register: {e}', WARNING)
                     raise e
                 log_to_postgres(f'Created new DAS with ID: {das_id.id}', DEBUG)
 
@@ -301,7 +376,7 @@ class DASFdw(ForeignDataWrapper):
             try:
                 response = table_service.GetDefinitions(request)
             except Exception as e:
-                log_to_postgres(f'Error in table_service.GetDefinitions: {e}', ERROR)
+                log_to_postgres(f'Error in table_service.GetDefinitions: {e}', WARNING)
                 raise e
             log_to_postgres(f'Got definitions: {response.definitions}', DEBUG)
 
@@ -315,12 +390,16 @@ class DASFdw(ForeignDataWrapper):
                 for column in columns:
                     column_definitions.append(ColumnDefinition(column.name, type_name=raw_type_to_postgresql(column.type)))
                 
-                options = dict(url=url, das_id=das_id.id, das_table_name=table_name, das_startup_cost=str(table.startupCost))
+                if 'das_type' in srv_options:
+                    table_options = dict(url=url, das_id=das_id.id, das_table_name=table_name, das_startup_cost=str(table.startupCost), das_type=srv_options['das_type'])
+                else:
+                    table_options = dict(url=url, das_id=das_id.id, das_table_name=table_name, das_startup_cost=str(table.startupCost))
 
-                table_definitions.append(TableDefinition(table_name, columns=column_definitions, options=options))
+                table_definitions.append(TableDefinition(table_name, columns=column_definitions, options=table_options))
             
             return table_definitions
     
+
 def raw_type_to_postgresql(t):
     type_name = t.WhichOneof('type')
     if type_name == 'undefined':
@@ -377,6 +456,7 @@ def raw_type_to_postgresql(t):
     else:
         raise ValueError(f"Unsupported Type: {type_name}")
 
+
 def raw_value_to_python(v):
     value_name = v.WhichOneof('value')
     if value_name == 'null':
@@ -426,7 +506,8 @@ def raw_value_to_python(v):
         return record
     else:
         raise Exception(f"Unknown RAW value: {value_name}")
-    
+
+
 def multicorn_quals_to_grpc_quals(quals):
     grpc_quals = []
     for qual in quals:
@@ -474,6 +555,7 @@ def multicorn_quals_to_grpc_quals(quals):
 
     log_to_postgres(f'Converted quals: {grpc_quals}', DEBUG)
     return grpc_quals
+
 
 # Convert a Python value to a RAW Value.
 # Returns a Value message or None if the value is not supported.
@@ -543,6 +625,7 @@ def python_value_to_raw(v):
     else:
         log_to_postgres(f'Unsupported value: {v}', WARNING)
         return None
+
 
 def multicorn_sortkeys_to_grpc_sortkeys(sortkeys):
     grpc_sort_keys_list = []
