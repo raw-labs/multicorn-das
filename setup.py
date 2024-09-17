@@ -37,15 +37,13 @@ logger = logging.getLogger(__name__)
 
 logger.info(f"Current path: {current_path}")
 
-# Custom command class to download .proto files and generate gRPC Python code
-class CustomBuild(_build_py):
+class PrepareGrpcPackages:
     
     def run(self):
         self.create_local_proto_dir()
         self.download_proto_files()
         self.generate_grpc_code()
         self.add_init_py_to_com_folders()
-        super().run()
 
     def create_local_proto_dir(self):
         """Ensure the local proto directory exists."""
@@ -144,6 +142,8 @@ class CustomBuild(_build_py):
             print(f"Created: {init_file_path}")
 
 
+PrepareGrpcPackages().run()
+
 setup(
     name='multicorn_das',
     use_scm_version=True,  # Automatically use the Git version
@@ -151,9 +151,6 @@ setup(
     packages=["com", "com.rawlabs", "com.rawlabs.protocol", "com.rawlabs.protocol.raw", "com.rawlabs.protocol.das", "com.rawlabs.protocol.das.services", "multicorn_das"],
     exclude_package_data={
         '': ['licenses/*', 'downloaded/*'],  # Exclude any files in these folders
-    },
-    cmdclass={
-        'build_py': CustomBuild  # Use the custom build command
     },
     install_requires=[
         'protobuf',
