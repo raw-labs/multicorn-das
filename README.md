@@ -21,7 +21,7 @@ This repository provides a Foreign Data Wrapper (FDW) implementation for the Dat
 1. Install the required Python dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip3 install .
 ```
 
 2.	Install and configure the [Multicorn2 extension](https://github.com/raw-labs/multicorn2) in your PostgreSQL instance. You must use Multicorn2 fork by RAW Labs as it contains several extensions/fixes that are required.
