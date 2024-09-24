@@ -416,7 +416,7 @@ def raw_type_to_postgresql(t):
         return 'INTEGER' + (' NULL' if t.int.nullable else '')
     elif type_name == 'long':
         assert(t.long.triable == False, "Triable types are not supported")
-        return 'BIGINT' + (' NULL' if t.ling.nullable else '')
+        return 'BIGINT' + (' NULL' if t.long.nullable else '')
     elif type_name == 'float':
         assert(t.float.triable == False, "Triable types are not supported")
         return 'REAL' + (' NULL' if t.float.nullable else '')
