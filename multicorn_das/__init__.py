@@ -526,7 +526,7 @@ def multicorn_quals_to_grpc_quals(quals):
             if not skip:
                 # All values are supported
                 is_any = qual.list_any_or_all == ANY
-                grpc_qual = DASListQual(is_any, raw_values)
+                grpc_qual = DASListQual(isAny=is_any, values=raw_values)
                 grpc_quals.append(DASQual(fieldName=field_name, listQual=grpc_qual))
         else:
             operator = None
