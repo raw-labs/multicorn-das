@@ -508,6 +508,24 @@ def raw_value_to_python(v):
         raise Exception(f"Unknown RAW value: {value_name}")
 
 
+def operator_to_grpc_operator(operator):
+    if operator == '=':
+        return Operator(equals=Equals())
+    elif operator == '<':
+        return Operator(lessThan=LessThan())
+    elif operator == '>':
+        return Operator(greaterThan=GreaterThan())
+    elif operator == '<=':
+        return Operator(lessThanOrEqual=LessThanOrEqual())
+    elif operator == '>=':
+        return Operator(greaterThanOrEqual=GreaterThanOrEqual())
+    elif operator in ['<>', '!=']:
+        return Operator(notEquals=NotEquals())
+    else:
+        # Unsupported operator
+        return None
+
+
 def multicorn_quals_to_grpc_quals(quals):
     grpc_quals = []
     for qual in quals:
@@ -526,25 +544,16 @@ def multicorn_quals_to_grpc_quals(quals):
             if not skip:
                 # All values are supported
                 is_any = qual.list_any_or_all == ANY
-                grpc_qual = DASListQual(isAny=is_any, values=raw_values)
+                operator =  operator_to_grpc_operator(qual.operator[0])
+                if not operator:
+                    log_to_postgres(f'Unsupported operator: {qual.operator[0]}', WARNING)
+                    continue
+                grpc_qual = DASListQual(operator=operator, isAny=is_any, values=raw_values)
                 grpc_quals.append(DASQual(fieldName=field_name, listQual=grpc_qual))
         else:
-            operator = None
-            if qual.operator == '=':
-                operator = Operator(equals=Equals())
-            elif qual.operator == '<':
-                operator = Operator(lessThan=LessThan())
-            elif qual.operator == '>':
-                operator = Operator(greaterThan=GreaterThan())
-            elif qual.operator == '<=':
-                operator = Operator(lessThanOrEqual=LessThanOrEqual())
-            elif qual.operator == '>=':
-                operator = Operator(greaterThanOrEqual=GreaterThanOrEqual())
-            elif qual.operator in ['<>', '!=']:
-                operator = Operator(notEquals=NotEquals())
-            else:
+            operator = operator_to_grpc_operator(qual.operator)
+            if not operator:
                 log_to_postgres(f'Unsupported operator: {qual.operator}', WARNING)
-                # Unsupported operator
                 continue
 
             raw_value = python_value_to_raw(qual.value)
