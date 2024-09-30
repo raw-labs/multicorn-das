@@ -17,7 +17,7 @@ from com.rawlabs.protocol.das.services.health_service_pb2_grpc import HealthChec
 from com.rawlabs.protocol.raw.values_pb2 import *
 
 import grpc
-import time
+from time import sleep
 
 class DASFdw(ForeignDataWrapper):
 
@@ -58,7 +58,7 @@ class DASFdw(ForeignDataWrapper):
             elif e.code() == grpc.StatusCode.UNAVAILABLE:
                 # Wait for server to be available again
                 log_to_postgres(f'Server unavailable, retrying...', WARNING)
-                time.sleep(0.5)
+                sleep(0.5)
                 attempts -= 1
 
                 self.health_service = HealthCheckServiceStub(self.channel)
@@ -584,12 +584,6 @@ def python_value_to_raw(v):
         return Value(bool=ValueBool(v=v))
     elif isinstance(v, Decimal):
         return Value(decimal=ValueDecimal(v=str(v)))
-    elif isinstance(v, date):
-        return Value(date=ValueDate(
-            year=v.year,
-            month=v.month,
-            day=v.day
-        ))
     elif isinstance(v, time):
         return Value(time=ValueTime(
             hour=v.hour,
@@ -597,6 +591,7 @@ def python_value_to_raw(v):
             second=v.second,
             nano=v.microsecond * 1000
         ))
+    # 'datetime' objects are instances of 'date', test this first.
     elif isinstance(v, datetime):
         return Value(timestamp=ValueTimestamp(
             year=v.year,
@@ -606,6 +601,12 @@ def python_value_to_raw(v):
             minute=v.minute,
             second=v.second,
             nano=v.microsecond * 1000
+        ))
+    elif isinstance(v, date):
+        return Value(date=ValueDate(
+            year=v.year,
+            month=v.month,
+            day=v.day
         ))
     elif isinstance(v, dict):
         # Check if it's an interval. No more than one of each field is allowed. No other fields are allowed
