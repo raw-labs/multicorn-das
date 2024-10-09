@@ -16,6 +16,8 @@ from com.rawlabs.protocol.das.services.registration_service_pb2_grpc import Regi
 from com.rawlabs.protocol.das.services.health_service_pb2_grpc import HealthCheckServiceStub
 from com.rawlabs.protocol.raw.values_pb2 import *
 
+import json
+import base64
 import grpc
 from time import sleep
 
@@ -486,10 +488,19 @@ def raw_type_to_postgresql(t):
         return 'INTERVAL' + (' NULL' if t.interval.nullable else '')
     elif type_name == 'record':
         assert(t.record.triable == False, "Triable types are not supported")
-        return 'HSTORE'
+        return 'JSONB'
     elif type_name == 'list':
         assert(t.list.triable == False, "Triable types are not supported")
-        return f'{raw_type_to_postgresql(t.list.innerType)}[]' + (' NULL' if t.list.nullable else '')
+        innerType = t.list.innerType
+        # Postgres arrays can always hold NULL values. Their inner type IS nullable.
+        innerTypeStr = raw_type_to_postgresql(innerType)
+        # When declaring the array type, the syntax doesn't accept that NULLABLE is specified.
+        # We remove ' NULL' if found.
+        if innerTypeStr.endswith(' NULL'):
+            innerTypeStr = innerTypeStr[:-5]
+        return f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
+    elif type_name == 'any':
+        return 'JSON'
     else:
         raise ValueError(f"Unsupported Type: {type_name}")
 
@@ -541,6 +552,8 @@ def raw_value_to_python(v):
         for f in v.record.fields:
             record[f.name] = raw_value_to_python(f.value)
         return record
+    elif value_name == 'list':
+        return [raw_value_to_python(i) for i in v.list.values]
     else:
         raise Exception(f"Unknown RAW value: {value_name}")
 
@@ -672,6 +685,16 @@ def python_value_to_raw(v):
     else:
         log_to_postgres(f'Unsupported value: {v}', WARNING)
         return None
+
+def multicorn_serialize_as_json(obj):
+    def default_serializer(obj):
+        if isinstance(obj, date):
+            return obj.isoformat()
+        elif isinstance(obj, bytes):
+            return base64.b64encode(obj).decode('utf-8')
+        else:
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+    return json.dumps(obj, default=default_serializer)
 
 
 def multicorn_sortkeys_to_grpc_sortkeys(sortkeys):
