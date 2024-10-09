@@ -189,8 +189,6 @@ class DASFdw(ForeignDataWrapper):
 
         grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys) if sortkeys else None
 
-        grpc_limit = int(limit) if limit else None
-
         # Create an ExecuteRequest message
         request = ExecuteRequest(
             dasId=self.das_id,
@@ -198,7 +196,7 @@ class DASFdw(ForeignDataWrapper):
             quals=grpc_quals,
             columns=grpc_columns,
             sortKeys=grpc_sort_keys,
-            limit=grpc_limit,
+            limit=limit,
             planId=str(planid)
         )
 
