@@ -447,10 +447,26 @@ def raw_type_to_postgresql(t):
         return 'INTERVAL' + (' NULL' if t.interval.nullable else '')
     elif type_name == 'record':
         assert(t.record.triable == False, "Triable types are not supported")
-        return 'HSTORE'
+        fieldTypes = [f.tipe.WhichOneof('type') for f in t.record.atts]
+        if fieldTypes != [] and all([tipe == 'string' for tipe in fieldTypes]):
+            # All fields are of type string, the type can be exposed as an HSTORE
+            return 'HSTORE'
+        else:
+            # Fields are unknown (empty list of fields) or some types aren't strings.
+            # Make it JSON.
+            return 'JSON'
     elif type_name == 'list':
         assert(t.list.triable == False, "Triable types are not supported")
-        return f'{raw_type_to_postgresql(t.list.innerType)}[]' + (' NULL' if t.list.nullable else '')
+        innerType = t.list.innerType
+        # Postgres arrays can always hold NULL values. Their inner type IS nullable.
+        innerTypeStr = raw_type_to_postgresql(innerType)
+        # When declaring the array type, the syntax doesn't accept that NULLABLE is specified.
+        # We remove ' NULL' if found.
+        if innerTypeStr.endsWith(' NULL'):
+            innerTypeStr = innerTypeStr[:-5]
+        return f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
+    elif type_name == 'any':
+        return 'JSON'
     else:
         raise ValueError(f"Unsupported Type: {type_name}")
 
@@ -502,6 +518,8 @@ def raw_value_to_python(v):
         for f in v.record.fields:
             record[f.name] = raw_value_to_python(f.value)
         return record
+    elif value_name == 'list':
+        return [raw_value_to_python(i) for i in v.list.values]
     else:
         raise Exception(f"Unknown RAW value: {value_name}")
 
