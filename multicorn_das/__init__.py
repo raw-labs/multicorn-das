@@ -6,7 +6,7 @@ from datetime import datetime, date, time
 from decimal import Decimal
 from logging import DEBUG, INFO, WARNING # Never use ERROR or CRITICAL in log_to_post as it relaunches an exception
 
-from com.rawlabs.protocol.das.services.tables_service_pb2 import GetDefinitionsRequest, GetRelSizeRequest, CanSortRequest, GetPathKeysRequest, ExecuteRequest, UniqueColumnRequest, InsertRequest, UpdateRequest, DeleteRequest
+from com.rawlabs.protocol.das.services.tables_service_pb2 import GetDefinitionsRequest, GetRelSizeRequest, CanSortRequest, GetPathKeysRequest, ExecuteRequest, UniqueColumnRequest, InsertRequest, BulkInsertRequest, UpdateRequest, DeleteRequest, ModifyBatchSizeRequest
 from com.rawlabs.protocol.das.services.registration_service_pb2 import RegisterRequest
 from com.rawlabs.protocol.das.services.health_service_pb2 import HealthCheckRequest
 from com.rawlabs.protocol.das.das_pb2 import DASId, DASDefinition
@@ -220,6 +220,23 @@ class DASFdw(ForeignDataWrapper):
 
 
     @property
+    def modify_batch_size(self):
+        log_to_postgres(f'Getting modify batch size {self.table_id}', DEBUG)
+        request = ModifyBatchSizeRequest(
+            dasId=self.das_id,
+            tableId=self.table_id
+        )
+        try:
+            response = self.table_service.ModifyBatchSize(request)
+        except Exception as e:
+            log_to_postgres(f'Error in table_service.ModifyBatchSize for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.modify_batch_size
+
+        log_to_postgres(f'Got modify batch size: {response.size} for table {self.table_id}', DEBUG)
+        return response.size
+
+    @property
     def rowid_column(self):
         log_to_postgres(f'Getting rowid column for table {self.table_id}', DEBUG)
 
@@ -233,7 +250,7 @@ class DASFdw(ForeignDataWrapper):
         except Exception as e:
             log_to_postgres(f'Error in table_service.UniqueColumns for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
-            return self.rowid_column()
+            return self.rowid_column
 
         log_to_postgres(f'Got unique column: {response.column} for table {self.table_id}', DEBUG)
 
@@ -273,7 +290,29 @@ class DASFdw(ForeignDataWrapper):
 
 
     def bulk_insert(self, all_values):
-        raise NotImplementedError("Not implemented")
+        log_to_postgres(f'Bulk inserting values: {all_values} into table {self.table_id}', DEBUG)
+        rows = [{name: python_value_to_raw(value) for name, value in row.items()} for row in all_values]
+
+        # Create an InsertRequest message
+        request = BulkInsertRequest(
+            dasId=self.das_id,
+            tableId=self.table_id,
+            values=[Row(data=row) for row in rows]
+        )
+
+        # Make the RPC call
+        try:
+            response = self.table_service.BulkInsert(request)
+        except Exception as e:
+            log_to_postgres(f'Error in table_service.BulkInsert for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.bulk_insert(values)
+
+        output_rows = [{name: raw_value_to_python(value) for name, value in row.data.items()} for row in response.rows]
+        log_to_postgres(f'Bulk insert of {len(all_values)} into table {self.table_id} returned row: {output_rows}', DEBUG)
+
+        return output_rows
+
     
 
     def update(self, rowid, new_values):
