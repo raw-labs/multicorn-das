@@ -500,7 +500,7 @@ def raw_type_to_postgresql(t):
             innerTypeStr = innerTypeStr[:-5]
         return f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
     elif type_name == 'any':
-        return 'JSON'
+        return 'JSONB'
     else:
         raise ValueError(f"Unsupported Type: {type_name}")
 
