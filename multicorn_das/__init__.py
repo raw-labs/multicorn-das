@@ -511,6 +511,8 @@ def raw_type_to_postgresql(t):
         if innerTypeStr.endswith(' NULL'):
             innerTypeStr = innerTypeStr[:-5]
         return f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
+    elif type_name == 'binary':
+        return 'BYTEA'
     elif type_name == 'any':
         return 'JSONB'
     else:
