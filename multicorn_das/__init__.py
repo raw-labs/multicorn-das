@@ -1,5 +1,6 @@
 """A foreign data wrapper for DAS."""
 
+import builtins
 from multicorn import *
 from multicorn.utils import log_to_postgres
 from datetime import datetime, date, time
@@ -388,7 +389,7 @@ class DASFdw(ForeignDataWrapper):
             else:
                 log_to_postgres(f'Creating new DAS', DEBUG)
                 if 'das_type' not in srv_options:
-                    raise ValueError('das_type is required when das_id is not provided')
+                    raise builtins.ValueError('das_type is required when das_id is not provided')
                 
                 log_to_postgres(f'Creating new DAS with type: {srv_options["das_type"]}', DEBUG)
 
@@ -499,10 +500,21 @@ def raw_type_to_postgresql(t):
         if innerTypeStr.endswith(' NULL'):
             innerTypeStr = innerTypeStr[:-5]
         return f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
+
+    elif type_name == 'iterable':
+        assert(t.iterable.triable == False, "Triable types are not supported")
+        innerType = t.iterable.innerType
+        # Postgres arrays can always hold NULL values. Their inner type IS nullable.
+        innerTypeStr = raw_type_to_postgresql(innerType)
+        # When declaring the array type, the syntax doesn't accept that NULLABLE is specified.
+        # We remove ' NULL' if found.
+        if innerTypeStr.endswith(' NULL'):
+            innerTypeStr = innerTypeStr[:-5]
+        return f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
     elif type_name == 'any':
         return 'JSONB'
     else:
-        raise ValueError(f"Unsupported Type: {type_name}")
+        raise builtins.ValueError(f"Unsupported Type: {type_name}")
 
 
 def raw_value_to_python(v):
