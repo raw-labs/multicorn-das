@@ -12,7 +12,7 @@ current_path = os.path.dirname(os.path.realpath(__file__))
 
 RAW_VERSION = "v0.39.0"
 
-DAS_VERSION = "v0.1.3"
+DAS_VERSION = "v0.1.4"
 
 PROTO_FILES = [
     f"https://raw.githubusercontent.com/raw-labs/snapi/{RAW_VERSION}/protocol-raw/src/main/protobuf/com/rawlabs/protocol/raw/types.proto",
