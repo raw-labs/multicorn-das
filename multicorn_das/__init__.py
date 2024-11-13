@@ -552,11 +552,20 @@ def raw_value_to_python(v):
     elif value_name == 'binary':
         return v.binary.v
     elif value_name == 'date':
-        return date(v.date.year, v.date.month, v.date.day)
+        try:
+            return date(v.date.year, v.date.month, v.date.day)
+        except builtins.ValueError as exc:
+            log_to_postgres(f'Unsupported date: {v.date}: {exc}', WARNING)
+            return None
     elif value_name == 'time':
         return time(v.time.hour, v.time.minute, v.time.second, v.time.nano // 1000)
     elif value_name == 'timestamp':
-        return datetime(v.timestamp.year, v.timestamp.month, v.timestamp.day, v.timestamp.hour, v.timestamp.minute, v.timestamp.second, v.timestamp.nano // 1000)
+        try:
+            return datetime(v.timestamp.year, v.timestamp.month, v.timestamp.day, v.timestamp.hour, v.timestamp.minute, v.timestamp.second, v.timestamp.nano // 1000)
+        except builtins.ValueError as exc:
+            log_to_postgres(f'Unsupported timestamp: {v.timestamp} {exc}', WARNING)
+            return None
+
     elif value_name == 'interval':
         # There is no Python type for intervals, so we return a custom dictionary.
         return {
