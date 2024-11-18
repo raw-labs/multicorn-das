@@ -218,7 +218,7 @@ class DASFdw(ForeignDataWrapper):
                 output_row = {}
                 for name, value in row.data.items():
                     output_row[name] = raw_value_to_python(value)
-                log_to_postgres(f'Yielding row: {output_row} for table {self.table_id}', DEBUG)
+                log_to_postgres(f'Yielding row for table {self.table_id}', DEBUG)
                 yield output_row
 
 
@@ -442,6 +442,7 @@ class DASFdw(ForeignDataWrapper):
 
 def raw_type_to_postgresql(t):
     type_name = t.WhichOneof('type')
+    log_to_postgres(f'raw_type_to_postgresql({type_name}, {t})', DEBUG)
     if type_name == 'undefined':
         if t.nullable: return 'TEXT'
         else: return 'UNKNOWN'
@@ -493,7 +494,7 @@ def raw_type_to_postgresql(t):
         # which all values are strings. For backward compatibility, we keep that
         # logic.
         fieldTypes = [f.tipe.WhichOneof('type') for f in t.record.atts]
-        log_to_postgres(f'fieldTypes = {fieldTypes}', WARNING)
+        log_to_postgres(f'fieldTypes = {fieldTypes}', DEBUG)
         if any([fieldType != 'string' for fieldType in fieldTypes]):
             return 'JSONB'
         else:
@@ -507,7 +508,9 @@ def raw_type_to_postgresql(t):
         # We remove ' NULL' if found.
         if innerTypeStr.endswith(' NULL'):
             innerTypeStr = innerTypeStr[:-5]
-        return f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
+        columnSchema = f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
+        log_to_postgres(columnSchema, DEBUG)
+        return columnSchema
 
     elif type_name == 'iterable':
         assert(t.iterable.triable == False, "Triable types are not supported")
@@ -518,7 +521,9 @@ def raw_type_to_postgresql(t):
         # We remove ' NULL' if found.
         if innerTypeStr.endswith(' NULL'):
             innerTypeStr = innerTypeStr[:-5]
-        return f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
+        columnSchema = f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
+        log_to_postgres(columnSchema, DEBUG)
+        return columnSchema
     elif type_name == 'binary':
         return 'BYTEA'
     elif type_name == 'any':
