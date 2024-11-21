@@ -658,6 +658,9 @@ def python_value_to_raw(v):
     log_to_postgres(f'Converting Python value to RAW: {v} (Python type: {type(v)})', DEBUG)
     if v is None:
         return Value(null=ValueNull())
+    elif isinstance(v, bool):
+        # To be tested before 'int' since booleans are also instances of 'int'
+        return Value(bool=ValueBool(v=v))
     elif isinstance(v, int):
         return Value(int=ValueInt(v=v))
     elif isinstance(v, float):
@@ -666,8 +669,6 @@ def python_value_to_raw(v):
         return Value(string=ValueString(v=v))
     elif isinstance(v, bytes):
         return Value(binary=ValueBinary(v=v))
-    elif isinstance(v, bool):
-        return Value(bool=ValueBool(v=v))
     elif isinstance(v, Decimal):
         return Value(decimal=ValueDecimal(v=str(v)))
     elif isinstance(v, time):
@@ -724,6 +725,8 @@ def python_value_to_raw(v):
 
 def multicorn_serialize_as_json(obj):
     def default_serializer(obj):
+        if isinstance(obj, time):
+            return obj.isoformat()
         if isinstance(obj, date):
             # `date` also catches `datetime`
             return obj.isoformat()
