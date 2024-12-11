@@ -212,15 +212,7 @@ class DASFdw(ForeignDataWrapper):
             return self.execute(quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
 
         # Iterate over the streamed responses and generate multicorn rows
-        for chunk in rows_stream:
-            #log_to_postgres(f'Got chunk with {len(chunk.rows)} rows for table {self.table_id}', DEBUG)
-            for row in chunk.rows:
-                output_row = {}
-                for name, value in row.data.items():
-                    output_row[name] = raw_value_to_python(value)
-                log_to_postgres(f'Yielding row for table {self.table_id}', DEBUG)
-                yield output_row
-
+        return BenIterator(self.table_id, rows_stream)
 
     @property
     def modify_batch_size(self):
@@ -752,3 +744,29 @@ def multicorn_sortkeys_to_grpc_sortkeys(sortkeys):
     
     log_to_postgres(f'Converted sortkeys: {grpc_sort_keys_list}', DEBUG)
     return DASSortKeys(sortKeys=grpc_sort_keys_list)
+
+class BenIterator:
+
+    def __init__(self, table_id, rows_stream):
+        self._table_id = table_id
+        self._stream = rows_stream
+        self._iterator = (build_row(row.data.items()) for chunk in rows_stream for row in chunk.rows)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        log_to_postgres(f'Yielding row for table {self._table_id}', DEBUG)
+        return self._iterator.__next__()
+
+    def close(self):
+        log_to_postgres('Cancelling!!', WARNING)
+        self._stream.cancel();
+
+def build_row(items):
+    output_row = {}
+    for name, value in items:
+        output_row[name] = raw_value_to_python(value)
+    return output_row
+
+
