@@ -212,15 +212,7 @@ class DASFdw(ForeignDataWrapper):
             return self.execute(quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
 
         # Iterate over the streamed responses and generate multicorn rows
-        for chunk in rows_stream:
-            #log_to_postgres(f'Got chunk with {len(chunk.rows)} rows for table {self.table_id}', DEBUG)
-            for row in chunk.rows:
-                output_row = {}
-                for name, value in row.data.items():
-                    output_row[name] = raw_value_to_python(value)
-                log_to_postgres(f'Yielding row for table {self.table_id}', DEBUG)
-                yield output_row
-
+        return GrpcStreamIterator(self.table_id, rows_stream)
 
     @property
     def modify_batch_size(self):
@@ -752,3 +744,112 @@ def multicorn_sortkeys_to_grpc_sortkeys(sortkeys):
     
     log_to_postgres(f'Converted sortkeys: {grpc_sort_keys_list}', DEBUG)
     return DASSortKeys(sortKeys=grpc_sort_keys_list)
+
+
+class GrpcStreamIterator:
+    """
+    A closeable iterator over a gRPC stream of row chunks.
+
+    - Once the iterator is closed, further iteration stops.
+    - If an error occurs while reading rows, the iterator is closed automatically.
+    - If the iterator completes naturally (StopIteration), it is also closed.
+
+    Usage:
+        rows_stream = grpc_stub.GetRows(...)  # some gRPC method returning a stream
+
+        with GrpcStreamIterator("mytable", rows_stream) as it:
+            for row in it:
+                # 'row' is a dict mapping column name -> Python value
+                do_something_with(row)
+    """
+
+    def __init__(self, table_id, rows_stream):
+        self._table_id = table_id
+        self._stream = rows_stream   # The gRPC stream
+        self._iterator = None        # Will hold our Python generator
+        self._closed = False         # Track whether we've called close()
+
+    def __enter__(self):
+        """
+        Optional: Support `with` context management.
+        """
+        self._iterator = self._rows_generator()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        On exiting the `with` block, ensure the stream is closed.
+        """
+        self.close()
+
+    def _rows_generator(self):
+        """
+        A generator that iterates over chunks in the stream, then yields each row.
+        Exits gracefully if we detect that the iterator has been closed.
+        """
+        try:
+            for chunk in self._stream:
+                # If user called .close(), exit early
+                if self._closed:
+                    break
+
+                # Each chunk has multiple rows
+                for row in chunk.rows:
+                    yield build_row(row.data.items())
+
+        except GeneratorExit:
+            # The generator got force-closed (e.g., if someone forcibly closed
+            # the Python generator). We'll just let it end.
+            pass
+
+    def __iter__(self):
+        """
+        Ensure this object is iterable. If we haven't created the generator,
+        do so now.
+        """
+        if self._iterator is None:
+            self._iterator = self._rows_generator()
+        return self
+
+    def __next__(self):
+        """
+        Get the next row from the generator, or close if we've reached the end.
+        """
+        if self._closed:
+            # If .close() was called, we don't return anything further.
+            raise StopIteration("Iterator already closed.")
+
+        try:
+            return next(self._iterator)
+        except StopIteration:
+            # Natural end of the generator => close and re-raise
+            self.close()
+            raise
+        except Exception:
+            # Any other error (including gRPC errors) => ensure we close, then re-raise
+            self.close()
+            raise
+
+    def close(self):
+        """
+        Close the iterator and cancel the gRPC stream (if still open).
+        """
+        if not self._closed:
+            self._closed = True
+            log_to_postgres(
+                f"Cancelling gRPC stream for table {self._table_id}",
+                WARNING
+            )
+            self._stream.cancel()
+
+
+def build_row(items):
+    """
+    Convert the 'row.data.items()' into a standard Python dict.
+    """
+    output_row = {}
+    for name, value in items:
+        output_row[name] = raw_value_to_python(value)
+    return output_row
+
+
