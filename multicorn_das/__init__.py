@@ -309,7 +309,7 @@ class DASFdw(ForeignDataWrapper):
         except Exception as e:
             log_to_postgres(f'Error in table_service.BulkInsert for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
-            return self.bulk_insert(values)
+            return self.bulk_insert(all_values)
 
         output_rows = [{name: raw_value_to_python(value) for name, value in row.data.items()} for row in response.rows]
         log_to_postgres(f'Bulk insert of {len(all_values)} into table {self.table_id} returned row: {output_rows}', DEBUG)
