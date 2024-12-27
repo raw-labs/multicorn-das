@@ -229,22 +229,7 @@ class DASFdw(ForeignDataWrapper):
             return self.execute(quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
 
         # Iterate over the streamed responses and generate multicorn rows
-<<<<<<< HEAD
         return GrpcStreamIterator(self.table_id, rows_stream)
-=======
-        for chunk in rows_stream:
-            #log_to_postgres(f'Got chunk with {len(chunk.rows)} rows for table {self.table_id}', DEBUG)
-            for row in chunk.rows:
-                output_row = {}
-                for col in row.columns:
-                    name = col.name
-                    data = col.data
-                    log_to_postgres(f'ExecuteTableRequest col {name} data {data}', DEBUG)
-                    output_row[name] = raw_value_to_python(data)
-                log_to_postgres(f'Yielding row for table {self.table_id}', DEBUG)
-                yield output_row
-
->>>>>>> 9cabc47 (WIP)
 
     @property
     def modify_batch_size(self):
@@ -913,9 +898,9 @@ class GrpcStreamIterator:
                 )
 
 
-def build_row(items):
+def build_row(row):
     """
-    Convert the 'row.data.items()' into a standard Python dict.
+    Convert the row into a standard Python dict.
     """
     output_row = {}
     for col in row.columns:
