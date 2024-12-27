@@ -1,0 +1,163 @@
+DROP EXTENSION
+CREATE EXTENSION
+CREATE SERVER
+CREATE SCHEMA
+IMPORT FOREIGN SCHEMA
+ column1 |   column2   
+---------+-------------
+       1 | row_tmp_1
+       2 | row_tmp_2
+       3 | row_tmp_3
+       4 | row_tmp_4
+       5 | row_tmp_5
+       6 | row_tmp_6
+       7 | row_tmp_7
+       8 | row_tmp_8
+       9 | row_tmp_9
+      10 | row_tmp_10
+      11 | row_tmp_11
+      12 | row_tmp_12
+      13 | row_tmp_13
+      14 | row_tmp_14
+      15 | row_tmp_15
+      16 | row_tmp_16
+      17 | row_tmp_17
+      18 | row_tmp_18
+      19 | row_tmp_19
+      20 | row_tmp_20
+      21 | row_tmp_21
+      22 | row_tmp_22
+      23 | row_tmp_23
+      24 | row_tmp_24
+      25 | row_tmp_25
+      26 | row_tmp_26
+      27 | row_tmp_27
+      28 | row_tmp_28
+      29 | row_tmp_29
+      30 | row_tmp_30
+      31 | row_tmp_31
+      32 | row_tmp_32
+      33 | row_tmp_33
+      34 | row_tmp_34
+      35 | row_tmp_35
+      36 | row_tmp_36
+      37 | row_tmp_37
+      38 | row_tmp_38
+      39 | row_tmp_39
+      40 | row_tmp_40
+      41 | row_tmp_41
+      42 | row_tmp_42
+      43 | row_tmp_43
+      44 | row_tmp_44
+      45 | row_tmp_45
+      46 | row_tmp_46
+      47 | row_tmp_47
+      48 | row_tmp_48
+      49 | row_tmp_49
+      50 | row_tmp_50
+      51 | row_tmp_51
+      52 | row_tmp_52
+      53 | row_tmp_53
+      54 | row_tmp_54
+      55 | row_tmp_55
+      56 | row_tmp_56
+      57 | row_tmp_57
+      58 | row_tmp_58
+      59 | row_tmp_59
+      60 | row_tmp_60
+      61 | row_tmp_61
+      62 | row_tmp_62
+      63 | row_tmp_63
+      64 | row_tmp_64
+      65 | row_tmp_65
+      66 | row_tmp_66
+      67 | row_tmp_67
+      68 | row_tmp_68
+      69 | row_tmp_69
+      70 | row_tmp_70
+      71 | row_tmp_71
+      72 | row_tmp_72
+      73 | row_tmp_73
+      74 | row_tmp_74
+      75 | row_tmp_75
+      76 | row_tmp_76
+      77 | row_tmp_77
+      78 | row_tmp_78
+      79 | row_tmp_79
+      80 | row_tmp_80
+      81 | row_tmp_81
+      82 | row_tmp_82
+      83 | row_tmp_83
+      84 | row_tmp_84
+      85 | row_tmp_85
+      86 | row_tmp_86
+      87 | row_tmp_87
+      88 | row_tmp_88
+      89 | row_tmp_89
+      90 | row_tmp_90
+      91 | row_tmp_91
+      92 | row_tmp_92
+      93 | row_tmp_93
+      94 | row_tmp_94
+      95 | row_tmp_95
+      96 | row_tmp_96
+      97 | row_tmp_97
+      98 | row_tmp_98
+      99 | row_tmp_99
+     100 | row_tmp_100
+(100 rows)
+
+ column1 |  column2   
+---------+------------
+       1 | row_tmp_1
+       2 | row_tmp_2
+       3 | row_tmp_3
+       4 | row_tmp_4
+       5 | row_tmp_5
+       6 | row_tmp_6
+       7 | row_tmp_7
+       8 | row_tmp_8
+       9 | row_tmp_9
+      10 | row_tmp_10
+(10 rows)
+
+ byte_col | short_col | int_col | long_col | float_col |     double_col     | decimal_col | string_col |                   binary_col                   | bool_col |  date_col  | time_col |    timestamp_col    |           interval_col            |     any_col      |                                                              strings_col                                                              |                                                                                                                   timestamps_col                                                                                                                    |                                                  record_col                                                  |                    str_record_col                    |                                                                                                                                str_records_col                                                                                                                                |                                                                                                                                                                                                                                                                                                                records_col                                                                                                                                                                                                                                                                                                                
+----------+-----------+---------+----------+-----------+--------------------+-------------+------------+------------------------------------------------+----------+------------+----------+---------------------+-----------------------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------+------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+        1 |         1 |       1 |        1 |      0.33 |               0.55 |           1 | 1          | \xc3896c75207061722063657474652063726170756c65 | f        | 2021-01-02 | 15:30:01 | 2021-01-02 15:30:01 | 1 year 1 mon 1 day 01:01:01       | "any string #1"  | {"item #1","item #2","item #3","item #4","item #5","item #6","item #7","item #8","item #9","item #10","item #11"}                     | {"2021-01-03 15:30:02","2021-01-03 15:30:03","2021-01-03 15:30:04","2021-01-03 15:30:05","2021-01-03 15:30:06","2021-01-03 15:30:07","2021-01-03 15:30:08","2021-01-03 15:30:09","2021-01-03 15:30:10","2021-01-03 15:30:11","2021-01-03 15:30:12"} | {"intField": 1, "binaryField": "w4lsdSBwYXIgY2V0dGUgY3JhcHVsZQ==", "timestampField": "2021-01-02T15:30:01"}  | "str1"=>"str 2", "str2"=>"str 3", "str3"=>"str 4"    | {"\"str1\"=>\"str 2\", \"str2\"=>\"str 3\", \"str3\"=>\"str 4\"","\"str1\"=>\"str 3\", \"str2\"=>\"str 4\", \"str3\"=>\"str 5\"","\"str1\"=>\"str 4\", \"str2\"=>\"str 5\", \"str3\"=>\"str 6\"","\"str1\"=>\"str 5\", \"str2\"=>\"str 6\", \"str3\"=>\"str 7\""}             | {"{\"intField\": 2, \"timeField\": \"15:30:01\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMik=\", \"timestampField\": \"2021-01-03T15:30:02\"}","{\"intField\": 3, \"timeField\": \"15:30:01\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMyk=\", \"timestampField\": \"2021-01-03T15:30:03\"}","{\"intField\": 4, \"timeField\": \"15:30:01\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoNCk=\", \"timestampField\": \"2021-01-03T15:30:04\"}","{\"intField\": 5, \"timeField\": \"15:30:01\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoNSk=\", \"timestampField\": \"2021-01-03T15:30:05\"}"}
+        2 |         2 |       2 |        2 |      0.66 |                1.1 |           2 | 2          | \xc3896c75207061722063657474652063726170756c65 | t        | 2021-01-03 | 15:30:02 | 2021-01-03 15:30:02 | 2 years 2 mons 2 days 02:02:02    | true             | {"item #4","item #6","item #8","item #10","item #12","item #14","item #16","item #18","item #20","item #22","item #24"}               | {"2021-01-05 15:30:04","2021-01-05 15:30:05","2021-01-05 15:30:06","2021-01-05 15:30:07","2021-01-05 15:30:08","2021-01-05 15:30:09","2021-01-05 15:30:10","2021-01-05 15:30:11","2021-01-05 15:30:12","2021-01-05 15:30:13","2021-01-05 15:30:14"} | {"intField": 2, "binaryField": "w4lsdSBwYXIgY2V0dGUgY3JhcHVsZQ==", "timestampField": "2021-01-03T15:30:02"}  | "str1"=>"str 3", "str2"=>"str 4", "str3"=>"str 5"    | {"\"str1\"=>\"str 4\", \"str2\"=>\"str 5\", \"str3\"=>\"str 6\"","\"str1\"=>\"str 5\", \"str2\"=>\"str 6\", \"str3\"=>\"str 7\"","\"str1\"=>\"str 6\", \"str2\"=>\"str 7\", \"str3\"=>\"str 8\"","\"str1\"=>\"str 7\", \"str2\"=>\"str 8\", \"str3\"=>\"str 9\""}             | {"{\"intField\": 4, \"timeField\": \"15:30:02\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoNCk=\", \"timestampField\": \"2021-01-05T15:30:04\"}","{\"intField\": 5, \"timeField\": \"15:30:02\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoNSk=\", \"timestampField\": \"2021-01-05T15:30:05\"}","{\"intField\": 6, \"timeField\": \"15:30:02\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoNik=\", \"timestampField\": \"2021-01-05T15:30:06\"}","{\"intField\": 7, \"timeField\": \"15:30:02\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoNyk=\", \"timestampField\": \"2021-01-05T15:30:07\"}"}
+        3 |         3 |       3 |        3 |      0.99 | 1.6500000000000001 |           3 | 3          | \xc3896c75207061722063657474652063726170756c65 | f        | 2021-01-04 | 15:30:03 | 2021-01-04 15:30:03 | 3 years 3 mons 3 days 03:03:03    | 3                | {"item #9","item #12","item #15","item #18","item #21","item #24","item #27","item #30","item #33","item #36","item #39"}             | {"2021-01-07 15:30:06","2021-01-07 15:30:07","2021-01-07 15:30:08","2021-01-07 15:30:09","2021-01-07 15:30:10","2021-01-07 15:30:11","2021-01-07 15:30:12","2021-01-07 15:30:13","2021-01-07 15:30:14","2021-01-07 15:30:15","2021-01-07 15:30:16"} | {"intField": 3, "binaryField": "w4lsdSBwYXIgY2V0dGUgY3JhcHVsZQ==", "timestampField": "2021-01-04T15:30:03"}  | "str1"=>"str 4", "str2"=>"str 5", "str3"=>"str 6"    | {"\"str1\"=>\"str 6\", \"str2\"=>\"str 7\", \"str3\"=>\"str 8\"","\"str1\"=>\"str 7\", \"str2\"=>\"str 8\", \"str3\"=>\"str 9\"","\"str1\"=>\"str 8\", \"str2\"=>\"str 9\", \"str3\"=>\"str 10\"","\"str1\"=>\"str 9\", \"str2\"=>\"str 10\", \"str3\"=>\"str 11\""}          | {"{\"intField\": 6, \"timeField\": \"15:30:03\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoNik=\", \"timestampField\": \"2021-01-07T15:30:06\"}","{\"intField\": 7, \"timeField\": \"15:30:03\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoNyk=\", \"timestampField\": \"2021-01-07T15:30:07\"}","{\"intField\": 8, \"timeField\": \"15:30:03\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoOCk=\", \"timestampField\": \"2021-01-07T15:30:08\"}","{\"intField\": 9, \"timeField\": \"15:30:03\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoOSk=\", \"timestampField\": \"2021-01-07T15:30:09\"}"}
+        4 |         4 |       4 |        4 |      1.32 |                2.2 |           4 | 4          | \xc3896c75207061722063657474652063726170756c65 | t        | 2021-01-05 | 15:30:04 | 2021-01-05 15:30:04 | 4 years 4 mons 4 days 04:04:04    | "any string #4"  | {"item #16","item #20","item #24","item #28","item #32","item #36","item #40","item #44","item #48","item #52","item #56"}            | {"2021-01-09 15:30:08","2021-01-09 15:30:09","2021-01-09 15:30:10","2021-01-09 15:30:11","2021-01-09 15:30:12","2021-01-09 15:30:13","2021-01-09 15:30:14","2021-01-09 15:30:15","2021-01-09 15:30:16","2021-01-09 15:30:17","2021-01-09 15:30:18"} | {"intField": 4, "binaryField": "w4lsdSBwYXIgY2V0dGUgY3JhcHVsZQ==", "timestampField": "2021-01-05T15:30:04"}  | "str1"=>"str 5", "str2"=>"str 6", "str3"=>"str 7"    | {"\"str1\"=>\"str 8\", \"str2\"=>\"str 9\", \"str3\"=>\"str 10\"","\"str1\"=>\"str 9\", \"str2\"=>\"str 10\", \"str3\"=>\"str 11\"","\"str1\"=>\"str 10\", \"str2\"=>\"str 11\", \"str3\"=>\"str 12\"","\"str1\"=>\"str 11\", \"str2\"=>\"str 12\", \"str3\"=>\"str 13\""}    | {"{\"intField\": 8, \"timeField\": \"15:30:04\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoOCk=\", \"timestampField\": \"2021-01-09T15:30:08\"}","{\"intField\": 9, \"timeField\": \"15:30:04\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoOSk=\", \"timestampField\": \"2021-01-09T15:30:09\"}","{\"intField\": 10, \"timeField\": \"15:30:04\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTAp\", \"timestampField\": \"2021-01-09T15:30:10\"}","{\"intField\": 11, \"timeField\": \"15:30:04\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTEp\", \"timestampField\": \"2021-01-09T15:30:11\"}"}
+        5 |         5 |       5 |        5 | 1.6500001 |               2.75 |           5 | 5          | \xc3896c75207061722063657474652063726170756c65 | f        | 2021-01-06 | 15:30:05 | 2021-01-06 15:30:05 | 5 years 5 mons 5 days 05:05:05    | false            | {"item #25","item #30","item #35","item #40","item #45","item #50","item #55","item #60","item #65","item #70","item #75"}            | {"2021-01-11 15:30:10","2021-01-11 15:30:11","2021-01-11 15:30:12","2021-01-11 15:30:13","2021-01-11 15:30:14","2021-01-11 15:30:15","2021-01-11 15:30:16","2021-01-11 15:30:17","2021-01-11 15:30:18","2021-01-11 15:30:19","2021-01-11 15:30:20"} | {"intField": 5, "binaryField": "w4lsdSBwYXIgY2V0dGUgY3JhcHVsZQ==", "timestampField": "2021-01-06T15:30:05"}  | "str1"=>"str 6", "str2"=>"str 7", "str3"=>"str 8"    | {"\"str1\"=>\"str 10\", \"str2\"=>\"str 11\", \"str3\"=>\"str 12\"","\"str1\"=>\"str 11\", \"str2\"=>\"str 12\", \"str3\"=>\"str 13\"","\"str1\"=>\"str 12\", \"str2\"=>\"str 13\", \"str3\"=>\"str 14\"","\"str1\"=>\"str 13\", \"str2\"=>\"str 14\", \"str3\"=>\"str 15\""} | {"{\"intField\": 10, \"timeField\": \"15:30:05\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTAp\", \"timestampField\": \"2021-01-11T15:30:10\"}","{\"intField\": 11, \"timeField\": \"15:30:05\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTEp\", \"timestampField\": \"2021-01-11T15:30:11\"}","{\"intField\": 12, \"timeField\": \"15:30:05\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTIp\", \"timestampField\": \"2021-01-11T15:30:12\"}","{\"intField\": 13, \"timeField\": \"15:30:05\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTMp\", \"timestampField\": \"2021-01-11T15:30:13\"}"}
+        6 |         6 |       6 |        6 |      1.98 | 3.3000000000000003 |           6 | 6          | \xc3896c75207061722063657474652063726170756c65 | t        | 2021-01-07 | 15:30:06 | 2021-01-07 15:30:06 | 6 years 6 mons 6 days 06:06:06    | 6                | {"item #36","item #42","item #48","item #54","item #60","item #66","item #72","item #78","item #84","item #90","item #96"}            | {"2021-01-13 15:30:12","2021-01-13 15:30:13","2021-01-13 15:30:14","2021-01-13 15:30:15","2021-01-13 15:30:16","2021-01-13 15:30:17","2021-01-13 15:30:18","2021-01-13 15:30:19","2021-01-13 15:30:20","2021-01-13 15:30:21","2021-01-13 15:30:22"} | {"intField": 6, "binaryField": "w4lsdSBwYXIgY2V0dGUgY3JhcHVsZQ==", "timestampField": "2021-01-07T15:30:06"}  | "str1"=>"str 7", "str2"=>"str 8", "str3"=>"str 9"    | {"\"str1\"=>\"str 12\", \"str2\"=>\"str 13\", \"str3\"=>\"str 14\"","\"str1\"=>\"str 13\", \"str2\"=>\"str 14\", \"str3\"=>\"str 15\"","\"str1\"=>\"str 14\", \"str2\"=>\"str 15\", \"str3\"=>\"str 16\"","\"str1\"=>\"str 15\", \"str2\"=>\"str 16\", \"str3\"=>\"str 17\""} | {"{\"intField\": 12, \"timeField\": \"15:30:06\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTIp\", \"timestampField\": \"2021-01-13T15:30:12\"}","{\"intField\": 13, \"timeField\": \"15:30:06\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTMp\", \"timestampField\": \"2021-01-13T15:30:13\"}","{\"intField\": 14, \"timeField\": \"15:30:06\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTQp\", \"timestampField\": \"2021-01-13T15:30:14\"}","{\"intField\": 15, \"timeField\": \"15:30:06\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTUp\", \"timestampField\": \"2021-01-13T15:30:15\"}"}
+        7 |         7 |       7 |        7 | 2.3100002 | 3.8500000000000005 |           7 | 7          | \xc3896c75207061722063657474652063726170756c65 | f        | 2021-01-08 | 15:30:07 | 2021-01-08 15:30:07 | 7 years 7 mons 7 days 07:07:07    | "any string #7"  | {"item #49","item #56","item #63","item #70","item #77","item #84","item #91","item #98","item #105","item #112","item #119"}         | {"2021-01-15 15:30:14","2021-01-15 15:30:15","2021-01-15 15:30:16","2021-01-15 15:30:17","2021-01-15 15:30:18","2021-01-15 15:30:19","2021-01-15 15:30:20","2021-01-15 15:30:21","2021-01-15 15:30:22","2021-01-15 15:30:23","2021-01-15 15:30:24"} | {"intField": 7, "binaryField": "w4lsdSBwYXIgY2V0dGUgY3JhcHVsZQ==", "timestampField": "2021-01-08T15:30:07"}  | "str1"=>"str 8", "str2"=>"str 9", "str3"=>"str 10"   | {"\"str1\"=>\"str 14\", \"str2\"=>\"str 15\", \"str3\"=>\"str 16\"","\"str1\"=>\"str 15\", \"str2\"=>\"str 16\", \"str3\"=>\"str 17\"","\"str1\"=>\"str 16\", \"str2\"=>\"str 17\", \"str3\"=>\"str 18\"","\"str1\"=>\"str 17\", \"str2\"=>\"str 18\", \"str3\"=>\"str 19\""} | {"{\"intField\": 14, \"timeField\": \"15:30:07\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTQp\", \"timestampField\": \"2021-01-15T15:30:14\"}","{\"intField\": 15, \"timeField\": \"15:30:07\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTUp\", \"timestampField\": \"2021-01-15T15:30:15\"}","{\"intField\": 16, \"timeField\": \"15:30:07\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTYp\", \"timestampField\": \"2021-01-15T15:30:16\"}","{\"intField\": 17, \"timeField\": \"15:30:07\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTcp\", \"timestampField\": \"2021-01-15T15:30:17\"}"}
+        8 |         8 |       8 |        8 |      2.64 |                4.4 |           8 | 8          | \xc3896c75207061722063657474652063726170756c65 | t        | 2021-01-09 | 15:30:08 | 2021-01-09 15:30:08 | 8 years 8 mons 8 days 08:08:08    | true             | {"item #64","item #72","item #80","item #88","item #96","item #104","item #112","item #120","item #128","item #136","item #144"}      | {"2021-01-17 15:30:16","2021-01-17 15:30:17","2021-01-17 15:30:18","2021-01-17 15:30:19","2021-01-17 15:30:20","2021-01-17 15:30:21","2021-01-17 15:30:22","2021-01-17 15:30:23","2021-01-17 15:30:24","2021-01-17 15:30:25","2021-01-17 15:30:26"} | {"intField": 8, "binaryField": "w4lsdSBwYXIgY2V0dGUgY3JhcHVsZQ==", "timestampField": "2021-01-09T15:30:08"}  | "str1"=>"str 9", "str2"=>"str 10", "str3"=>"str 11"  | {"\"str1\"=>\"str 16\", \"str2\"=>\"str 17\", \"str3\"=>\"str 18\"","\"str1\"=>\"str 17\", \"str2\"=>\"str 18\", \"str3\"=>\"str 19\"","\"str1\"=>\"str 18\", \"str2\"=>\"str 19\", \"str3\"=>\"str 20\"","\"str1\"=>\"str 19\", \"str2\"=>\"str 20\", \"str3\"=>\"str 21\""} | {"{\"intField\": 16, \"timeField\": \"15:30:08\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTYp\", \"timestampField\": \"2021-01-17T15:30:16\"}","{\"intField\": 17, \"timeField\": \"15:30:08\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTcp\", \"timestampField\": \"2021-01-17T15:30:17\"}","{\"intField\": 18, \"timeField\": \"15:30:08\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTgp\", \"timestampField\": \"2021-01-17T15:30:18\"}","{\"intField\": 19, \"timeField\": \"15:30:08\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTkp\", \"timestampField\": \"2021-01-17T15:30:19\"}"}
+        9 |         9 |       9 |        9 |      2.97 |               4.95 |           9 | 9          | \xc3896c75207061722063657474652063726170756c65 | f        | 2021-01-10 | 15:30:09 | 2021-01-10 15:30:09 | 9 years 9 mons 9 days 09:09:09    | 9                | {"item #81","item #90","item #99","item #108","item #117","item #126","item #135","item #144","item #153","item #162","item #171"}    | {"2021-01-19 15:30:18","2021-01-19 15:30:19","2021-01-19 15:30:20","2021-01-19 15:30:21","2021-01-19 15:30:22","2021-01-19 15:30:23","2021-01-19 15:30:24","2021-01-19 15:30:25","2021-01-19 15:30:26","2021-01-19 15:30:27","2021-01-19 15:30:28"} | {"intField": 9, "binaryField": "w4lsdSBwYXIgY2V0dGUgY3JhcHVsZQ==", "timestampField": "2021-01-10T15:30:09"}  | "str1"=>"str 10", "str2"=>"str 11", "str3"=>"str 12" | {"\"str1\"=>\"str 18\", \"str2\"=>\"str 19\", \"str3\"=>\"str 20\"","\"str1\"=>\"str 19\", \"str2\"=>\"str 20\", \"str3\"=>\"str 21\"","\"str1\"=>\"str 20\", \"str2\"=>\"str 21\", \"str3\"=>\"str 22\"","\"str1\"=>\"str 21\", \"str2\"=>\"str 22\", \"str3\"=>\"str 23\""} | {"{\"intField\": 18, \"timeField\": \"15:30:09\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTgp\", \"timestampField\": \"2021-01-19T15:30:18\"}","{\"intField\": 19, \"timeField\": \"15:30:09\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMTkp\", \"timestampField\": \"2021-01-19T15:30:19\"}","{\"intField\": 20, \"timeField\": \"15:30:09\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMjAp\", \"timestampField\": \"2021-01-19T15:30:20\"}","{\"intField\": 21, \"timeField\": \"15:30:09\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMjEp\", \"timestampField\": \"2021-01-19T15:30:21\"}"}
+       10 |        10 |      10 |       10 | 3.3000002 |                5.5 |          10 | 10         | \xc3896c75207061722063657474652063726170756c65 | t        | 2021-01-11 | 15:30:10 | 2021-01-11 15:30:10 | 10 years 10 mons 10 days 10:10:10 | "any string #10" | {"item #100","item #110","item #120","item #130","item #140","item #150","item #160","item #170","item #180","item #190","item #200"} | {"2021-01-21 15:30:20","2021-01-21 15:30:21","2021-01-21 15:30:22","2021-01-21 15:30:23","2021-01-21 15:30:24","2021-01-21 15:30:25","2021-01-21 15:30:26","2021-01-21 15:30:27","2021-01-21 15:30:28","2021-01-21 15:30:29","2021-01-21 15:30:30"} | {"intField": 10, "binaryField": "w4lsdSBwYXIgY2V0dGUgY3JhcHVsZQ==", "timestampField": "2021-01-11T15:30:10"} | "str1"=>"str 11", "str2"=>"str 12", "str3"=>"str 13" | {"\"str1\"=>\"str 20\", \"str2\"=>\"str 21\", \"str3\"=>\"str 22\"","\"str1\"=>\"str 21\", \"str2\"=>\"str 22\", \"str3\"=>\"str 23\"","\"str1\"=>\"str 22\", \"str2\"=>\"str 23\", \"str3\"=>\"str 24\"","\"str1\"=>\"str 23\", \"str2\"=>\"str 24\", \"str3\"=>\"str 25\""} | {"{\"intField\": 20, \"timeField\": \"15:30:10\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMjAp\", \"timestampField\": \"2021-01-21T15:30:20\"}","{\"intField\": 21, \"timeField\": \"15:30:10\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMjEp\", \"timestampField\": \"2021-01-21T15:30:21\"}","{\"intField\": 22, \"timeField\": \"15:30:10\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMjIp\", \"timestampField\": \"2021-01-21T15:30:22\"}","{\"intField\": 23, \"timeField\": \"15:30:10\", \"binaryField\": \"w4lsdSBwYXIgY2V0dGUgY3JhcHVsZSAoMjMp\", \"timestampField\": \"2021-01-21T15:30:23\"}"}
+(10 rows)
+
+ column1 | column2 
+---------+---------
+(0 rows)
+
+INSERT 0 1
+INSERT 0 1
+UPDATE 1
+ column1 | column2 
+---------+---------
+       1 | Um
+(1 row)
+
+DELETE 1
+ column1 | column2 
+---------+---------
+       1 | Um
+(1 row)
+
+DELETE 1
+ count 
+-------
+     0
+(1 row)
+
+DROP SCHEMA
+DROP SERVER
