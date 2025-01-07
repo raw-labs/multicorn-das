@@ -840,7 +840,15 @@ class GrpcStreamIterator:
                 f"Cancelling gRPC stream for table {self._table_id}",
                 WARNING
             )
-            self._stream.cancel()
+            try:
+                self._stream.cancel()
+            except Exception as e:
+                # Log and continue. Typically we don't want a cancel() error
+                # to overshadow the original cause of a shutdown or error.
+                log_to_postgres(
+                    f"Error canceling gRPC stream for table {self._table_id}: {e}",
+                    WARNING
+                )
 
 
 def build_row(items):
