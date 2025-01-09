@@ -37,7 +37,7 @@ class DASFdw(ForeignDataWrapper):
         log_to_postgres(f'Initializing DASFdw with options: {fdw_options}', DEBUG)
         self.url = fdw_options['das_url']
         log_to_postgres(f'Connecting to {self.url}', DEBUG)
-        self.channel = grpc.insecure_channel(self.url)
+        self.__create_channel()
         self.table_service = TablesServiceStub(self.channel)
 
         self.das_id = DASId(id=fdw_options['das_id'])
@@ -50,6 +50,12 @@ class DASFdw(ForeignDataWrapper):
         self._startup_cost = int(fdw_options.get('das_startup_cost', '20'))
         
         log_to_postgres(f'Initialized DASFdw with DAS ID: {self.das_id.id}, Table ID: {self.table_id.name}', DEBUG)
+
+    def __create_channel(self):
+        self.channel = grpc.insecure_channel(self.url, options=[
+            ('grpc.max_receive_message_length', 4194304),
+            ('grpc.max_send_message_length', 10 * 1024 * 1024),  # Optional: Adjust send size if needed
+        ])
 
 
     # This is used for crash recovery.
@@ -67,15 +73,14 @@ class DASFdw(ForeignDataWrapper):
                 # Wait for server to be available again
                 log_to_postgres(f'Server unavailable, retrying...', WARNING)
                 sleep(0.5)
-                attempts -= 1
-
+                self.__create_channel()
                 self.health_service = HealthCheckServiceStub(self.channel)
                 try:
                     response = self.health_service.Check(HealthCheckRequest())
                     # If we reach here, the server is available again
                     break
                 except Exception as ex:
-                    log_to_postgres(f'Error in health_service.Check: {e}', WARNING)
+                    log_to_postgres(f'Error in health_service.Check: {ex}', WARNING)
                     e = ex
                     attempts -= 1
                     if attempts == 0:
@@ -163,7 +168,7 @@ class DASFdw(ForeignDataWrapper):
         log_to_postgres(f'Can sort: {response} for table {self.table_id}', DEBUG)
 
         out = []
-        for sk in response.sortKeys.sortKeys:
+        for sk in response.sort_keys:
             out.append(SortKey(attname=sk.name, attnum=sk.pos, is_reversed=sk.isReversed, nulls_first=sk.nullsFirst, collate=sk.collate))
         return out
 
@@ -651,7 +656,7 @@ def multicorn_quals_to_grpc_quals(quals):
             if not skip:
                 # All values are supported
                 operator = operator_to_grpc_operator(qual.operator[0])
-                if not operator:
+                if operator is None:
                     log_to_postgres(f'Unsupported operator: {qual.operator[0]}', WARNING)
                     continue
                 if qual.list_any_or_all == ANY:
@@ -664,7 +669,7 @@ def multicorn_quals_to_grpc_quals(quals):
             log_to_postgres(f'Hello 2', DEBUG)
             operator = operator_to_grpc_operator(qual.operator)
             log_to_postgres(f'Hello 3', DEBUG)
-            if not operator:
+            if operator is None:
                 log_to_postgres(f'Unsupported operator: {qual.operator}', WARNING)
                 continue
 
