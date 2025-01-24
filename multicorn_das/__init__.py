@@ -207,11 +207,12 @@ class DASFdw(ForeignDataWrapper):
         grpc_quals = multicorn_quals_to_grpc_quals(quals)
         grpc_columns = columns
         grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys)
+        grpc_max_batch_size = 4194304
 
         query = Query(
             quals=grpc_quals,
             columns=grpc_columns,
-            sort_keys=grpc_sort_keys,
+            sort_keys=grpc_sort_keys
         )
 
         # Create an ExecuteRequest message
@@ -219,7 +220,9 @@ class DASFdw(ForeignDataWrapper):
             das_id=self.das_id,
             table_id=self.table_id,
             query=query,
-            plan_id=str(planid)
+            plan_id=str(planid),
+            max_batch_size_bytes=grpc_max_batch_size,
+            max_cache_age_seconds=3600
         )
         log_to_postgres(f'ExecuteTableRequest request: {request}', DEBUG)
 
