@@ -32,7 +32,7 @@ class DASFdw(ForeignDataWrapper):
         log_to_postgres(f'Initializing DASFdw with options: {fdw_options}', DEBUG)
         self.url = fdw_options['das_url']
         log_to_postgres(f'Connecting to {self.url}', DEBUG)
-        self.channel = grpc.insecure_channel(self.url)
+        self.__create_channel()
         self.table_service = TablesServiceStub(self.channel)
 
         self.das_id = DASId(id=fdw_options['das_id'])
@@ -46,11 +46,17 @@ class DASFdw(ForeignDataWrapper):
         
         log_to_postgres(f'Initialized DASFdw with DAS ID: {self.das_id.id}, Table ID: {self.table_id.name}', DEBUG)
 
+    def __create_channel(self):
+        self.channel = grpc.insecure_channel(self.url)
 
     # This is used for crash recovery.
     # First off, it will wait for the server to come back alive if it's a server unavailable error.
     # Then, it will re-register the DAS if it was not defined in fdw_options.
     def __crash_recovery(self, e):
+
+        if e.code() == grpc.StatusCode.INVALID_ARGUMENT:
+            # This is how user visible errors are returned. We raise the exception.
+            raise e
 
         # First wait for server to come back alive if it's a server unavailable error
         attempts = 30
@@ -62,7 +68,7 @@ class DASFdw(ForeignDataWrapper):
                 # Wait for server to be available again
                 log_to_postgres(f'Server unavailable, retrying...', WARNING)
                 sleep(0.5)
-                attempts -= 1
+                self.__create_channel()
 
                 self.health_service = HealthCheckServiceStub(self.channel)
                 try:
@@ -70,7 +76,7 @@ class DASFdw(ForeignDataWrapper):
                     # If we reach here, the server is available again
                     break
                 except Exception as ex:
-                    log_to_postgres(f'Error in health_service.Check: {e}', WARNING)
+                    log_to_postgres(f'Error in health_service.Check: {ex}', WARNING)
                     e = ex
                     attempts -= 1
                     if attempts == 0:
