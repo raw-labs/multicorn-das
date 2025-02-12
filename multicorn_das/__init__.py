@@ -7,8 +7,6 @@ from datetime import datetime, date, time
 from decimal import Decimal
 from logging import DEBUG, INFO, WARNING # Never use ERROR or CRITICAL in log_to_post as it relaunches an exception
 
-from google.protobuf.duration import Duration
-
 from com.rawlabs.protocol.das.v1.common.das_pb2 import DASId, DASDefinition
 from com.rawlabs.protocol.das.v1.tables.tables_pb2 import TableId, Row, Column
 from com.rawlabs.protocol.das.v1.types.values_pb2 import Value, ValueNull, ValueByte, ValueShort, ValueInt, ValueFloat, ValueDouble, ValueDecimal, ValueBool, ValueString, ValueBinary, ValueString, ValueDate, ValueTime, ValueTimestamp, ValueInterval, ValueRecord, ValueRecordAttr, ValueList
@@ -214,7 +212,8 @@ class DASFdw(ForeignDataWrapper):
         query = Query(
             quals=grpc_quals,
             columns=grpc_columns,
-            sort_keys=grpc_sort_keys
+            sort_keys=grpc_sort_keys,
+            limit=limit
         )
 
         # Create an ExecuteRequest message
@@ -223,8 +222,7 @@ class DASFdw(ForeignDataWrapper):
             table_id=self.table_id,
             query=query,
             plan_id=str(planid),
-            max_batch_size_bytes=grpc_max_batch_size,
-            max_cache_age=Duration(seconds=5, nanos=0)
+            max_batch_size_bytes=grpc_max_batch_size
         )
         log_to_postgres(f'ExecuteTableRequest request: {request}', DEBUG)
 
