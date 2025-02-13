@@ -52,7 +52,10 @@ class DASFdw(ForeignDataWrapper):
         log_to_postgres(f'Initialized DASFdw with DAS ID: {self.das_id.id}, Table ID: {self.table_id.name}', DEBUG)
 
     def __create_channel(self):
-        self.channel = grpc.insecure_channel(self.url)
+        self.channel = grpc.insecure_channel(self.url, options=[
+            ('grpc.max_receive_message_length', 4194304),
+            ('grpc.max_send_message_length', 10 * 1024 * 1024),  # Optional: Adjust send size if needed
+        ])
 
     # This is used for crash recovery.
     # First off, it will wait for the server to come back alive if it's a server unavailable error.
@@ -169,7 +172,7 @@ class DASFdw(ForeignDataWrapper):
         log_to_postgres(f'Can sort: {response} for table {self.table_id}', DEBUG)
 
         out = []
-        for sk in response.sortKeys.sortKeys:
+        for sk in response.sort_keys:
             out.append(SortKey(attname=sk.name, attnum=sk.pos, is_reversed=sk.isReversed, nulls_first=sk.nullsFirst, collate=sk.collate))
         return out
 
@@ -198,8 +201,8 @@ class DASFdw(ForeignDataWrapper):
         return out
 
 
-    def execute(self, quals, columns, sortkeys=None, limit=None, planid=None):
-        log_to_postgres(f'Executing for table {self.table_id} with quals: {quals}, columns: {columns}, sortkeys: {sortkeys}, limit: {limit}, planid: {planid}', DEBUG)
+    def explain(self, quals, columns, sortkeys=None, limit=None, verbose=False):
+        log_to_postgres(f'Explaining for table {self.table_id} with quals: {quals}, columns: {columns}, sortkeys: {sortkeys}, limit: {limit}, verbose: {verbose}', DEBUG)
 
         grpc_quals = multicorn_quals_to_grpc_quals(quals)
         grpc_columns = columns
@@ -209,6 +212,39 @@ class DASFdw(ForeignDataWrapper):
             quals=grpc_quals,
             columns=grpc_columns,
             sort_keys=grpc_sort_keys,
+            limit=limit
+        )
+
+        # Create an ExecuteRequest message
+        request = ExplainTableRequest(
+            das_id=self.das_id,
+            table_id=self.table_id,
+            query=query
+        )
+
+        # Make the RPC call
+        try:
+            response = self.table_service.ExplainTable(request)
+            return response.stmts
+        except Exception as e:
+            log_to_postgres(f'Error in table_service.Explain for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.explain(quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
+
+
+    def execute(self, quals, columns, sortkeys=None, limit=None, planid=None):
+        log_to_postgres(f'Executing for table {self.table_id} with quals: {quals}, columns: {columns}, sortkeys: {sortkeys}, limit: {limit}, planid: {planid}', DEBUG)
+
+        grpc_quals = multicorn_quals_to_grpc_quals(quals)
+        grpc_columns = columns
+        grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys)
+        grpc_max_batch_size = 4194304
+
+        query = Query(
+            quals=grpc_quals,
+            columns=grpc_columns,
+            sort_keys=grpc_sort_keys,
+            limit=limit
         )
 
         # Create an ExecuteRequest message
@@ -216,7 +252,8 @@ class DASFdw(ForeignDataWrapper):
             das_id=self.das_id,
             table_id=self.table_id,
             query=query,
-            plan_id=str(planid)
+            plan_id=str(planid),
+            max_batch_size_bytes=grpc_max_batch_size
         )
         log_to_postgres(f'ExecuteTableRequest request: {request}', DEBUG)
 
@@ -657,7 +694,7 @@ def multicorn_quals_to_grpc_quals(quals):
             if not skip:
                 # All values are supported
                 operator = operator_to_grpc_operator(qual.operator[0])
-                if not operator:
+                if operator is None:
                     log_to_postgres(f'Unsupported operator: {qual.operator[0]}', WARNING)
                     continue
                 if qual.list_any_or_all == ANY:
@@ -670,7 +707,7 @@ def multicorn_quals_to_grpc_quals(quals):
             log_to_postgres(f'Hello 2', DEBUG)
             operator = operator_to_grpc_operator(qual.operator)
             log_to_postgres(f'Hello 3', DEBUG)
-            if not operator:
+            if operator is None:
                 log_to_postgres(f'Unsupported operator: {qual.operator}', WARNING)
                 continue
 
