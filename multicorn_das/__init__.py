@@ -201,6 +201,37 @@ class DASFdw(ForeignDataWrapper):
         return out
 
 
+    def explain(self, quals, columns, sortkeys=None, limit=None, verbose=False):
+        log_to_postgres(f'Explaining for table {self.table_id} with quals: {quals}, columns: {columns}, sortkeys: {sortkeys}, limit: {limit}, verbose: {verbose}', DEBUG)
+
+        grpc_quals = multicorn_quals_to_grpc_quals(quals)
+        grpc_columns = columns
+        grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys)
+
+        query = Query(
+            quals=grpc_quals,
+            columns=grpc_columns,
+            sort_keys=grpc_sort_keys,
+            limit=limit
+        )
+
+        # Create an ExecuteRequest message
+        request = ExplainTableRequest(
+            das_id=self.das_id,
+            table_id=self.table_id,
+            query=query
+        )
+
+        # Make the RPC call
+        try:
+            response = self.table_service.ExplainTable(request)
+            return response.stmts
+        except Exception as e:
+            log_to_postgres(f'Error in table_service.Explain for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.explain(quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
+
+
     def execute(self, quals, columns, sortkeys=None, limit=None, planid=None):
         log_to_postgres(f'Executing for table {self.table_id} with quals: {quals}, columns: {columns}, sortkeys: {sortkeys}, limit: {limit}, planid: {planid}', DEBUG)
 
