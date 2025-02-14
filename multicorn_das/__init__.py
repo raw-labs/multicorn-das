@@ -920,10 +920,6 @@ class GrpcStreamIterator:
         """
         if not self._closed:
             self._closed = True
-            log_to_postgres(
-                f"Cancelling gRPC stream for table {self._table_id}",
-                WARNING
-            )
             try:
                 self._stream.cancel()
             except Exception as e:
