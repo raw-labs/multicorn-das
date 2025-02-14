@@ -11,7 +11,7 @@ import requests
 
 current_path = os.path.dirname(os.path.realpath(__file__))
 
-DAS_VERSION = "protocol-v1"
+DAS_VERSION = "v1.0.0"
 
 PROTOS = [
     "com/rawlabs/protocol/das/v1/common/das.proto",
