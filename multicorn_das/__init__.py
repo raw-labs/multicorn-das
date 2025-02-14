@@ -7,15 +7,19 @@ from datetime import datetime, date, time
 from decimal import Decimal
 from logging import DEBUG, INFO, WARNING # Never use ERROR or CRITICAL in log_to_post as it relaunches an exception
 
-from com.rawlabs.protocol.das.services.tables_service_pb2 import GetDefinitionsRequest, GetRelSizeRequest, CanSortRequest, GetPathKeysRequest, ExecuteRequest, UniqueColumnRequest, InsertRequest, BulkInsertRequest, UpdateRequest, DeleteRequest, ModifyBatchSizeRequest
-from com.rawlabs.protocol.das.services.registration_service_pb2 import RegisterRequest
-from com.rawlabs.protocol.das.services.health_service_pb2 import HealthCheckRequest
-from com.rawlabs.protocol.das.das_pb2 import DASId, DASDefinition
-from com.rawlabs.protocol.das.tables_pb2 import TableId, SortKeys as DASSortKeys, SortKey as DASSortKey, Qual as DASQual, SimpleQual as DASSimpleQual, ListQual as DASListQual, Operator, Equals, NotEquals, LessThan, LessThanOrEqual, GreaterThan, GreaterThanOrEqual, Row
-from com.rawlabs.protocol.das.services.tables_service_pb2_grpc import TablesServiceStub
-from com.rawlabs.protocol.das.services.registration_service_pb2_grpc import RegistrationServiceStub
-from com.rawlabs.protocol.das.services.health_service_pb2_grpc import HealthCheckServiceStub
-from com.rawlabs.protocol.raw.values_pb2 import *
+from com.rawlabs.protocol.das.v1.common.das_pb2 import DASId, DASDefinition
+from com.rawlabs.protocol.das.v1.tables.tables_pb2 import TableId, Row, Column
+from com.rawlabs.protocol.das.v1.types.values_pb2 import Value, ValueNull, ValueByte, ValueShort, ValueInt, ValueFloat, ValueDouble, ValueDecimal, ValueBool, ValueString, ValueBinary, ValueString, ValueDate, ValueTime, ValueTimestamp, ValueInterval, ValueRecord, ValueRecordAttr, ValueList
+from com.rawlabs.protocol.das.v1.query.quals_pb2 import Qual as DASQual, SimpleQual as DASSimpleQual, IsAnyQual, IsAllQual
+from com.rawlabs.protocol.das.v1.query.operators_pb2 import Operator
+from com.rawlabs.protocol.das.v1.query.query_pb2 import SortKey as DASSortKey, Query
+from com.rawlabs.protocol.das.v1.services.tables_service_pb2 import GetTableDefinitionsRequest, GetTableEstimateRequest, GetTableSortOrdersRequest, GetTablePathKeysRequest, ExplainTableRequest, ExecuteTableRequest, GetTableUniqueColumnRequest, InsertTableRequest, BulkInsertTableRequest, UpdateTableRequest, DeleteTableRequest, GetBulkInsertTableSizeRequest
+from com.rawlabs.protocol.das.v1.services.registration_service_pb2 import RegisterRequest
+from com.rawlabs.protocol.das.v1.services.health_service_pb2 import HealthCheckRequest
+
+from com.rawlabs.protocol.das.v1.services.tables_service_pb2_grpc import TablesServiceStub
+from com.rawlabs.protocol.das.v1.services.registration_service_pb2_grpc import RegistrationServiceStub
+from com.rawlabs.protocol.das.v1.services.health_service_pb2_grpc import HealthCheckServiceStub
 
 import json
 import base64
@@ -26,6 +30,7 @@ class DASFdw(ForeignDataWrapper):
 
     # This is the default cost of starting up the FDW. The actual value is set in constructor __init__.
     _startup_cost = 20
+
 
     def __init__(self, fdw_options, fdw_columns):
         super(DASFdw, self).__init__(fdw_options, fdw_columns)
@@ -47,14 +52,17 @@ class DASFdw(ForeignDataWrapper):
         log_to_postgres(f'Initialized DASFdw with DAS ID: {self.das_id.id}, Table ID: {self.table_id.name}', DEBUG)
 
     def __create_channel(self):
-        self.channel = grpc.insecure_channel(self.url)
+        self.channel = grpc.insecure_channel(self.url, options=[
+            ('grpc.max_receive_message_length', 4194304),
+            ('grpc.max_send_message_length', 10 * 1024 * 1024),  # Optional: Adjust send size if needed
+        ])
 
     # This is used for crash recovery.
     # First off, it will wait for the server to come back alive if it's a server unavailable error.
     # Then, it will re-register the DAS if it was not defined in fdw_options.
     def __crash_recovery(self, e):
 
-        if e.code() == grpc.StatusCode.INVALID_ARGUMENT:
+        if e.code() in [grpc.StatusCode.INVALID_ARGUMENT, grpc.StatusCode.UNIMPLEMENTED]:
             # This is how user visible errors are returned. We raise the exception.
             raise e
 
@@ -106,11 +114,14 @@ class DASFdw(ForeignDataWrapper):
         request = RegisterRequest(definition=das_definition, id=self.das_id)
 
         try:
-            registration_service.Register(request)
+            response = registration_service.Register(request)
         except Exception as e:
             log_to_postgres(f'Error in registration_service.Register: {e}', WARNING)
             raise e
         
+        if response.error:
+            raise builtins.ValueError(response.error)
+                
         log_to_postgres(f'Re-registered DAS with ID: {self.das_id.id}', DEBUG)
 
 
@@ -120,17 +131,18 @@ class DASFdw(ForeignDataWrapper):
         grpc_quals = multicorn_quals_to_grpc_quals(quals)
         grpc_columns = columns
 
-        request = GetRelSizeRequest(
-            dasId=self.das_id,
-            tableId=self.table_id,
+        request = GetTableEstimateRequest(
+            das_id=self.das_id,
+            table_id=self.table_id,
             quals=grpc_quals,
             columns=grpc_columns
         )
+        log_to_postgres(f'GetTableEstimateRequest: {request}', DEBUG)
 
         try:
-            response = self.table_service.GetRelSize(request)
+            response = self.table_service.GetTableEstimate(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.GetRelSize for table {self.table_id}: {e}', WARNING)
+            log_to_postgres(f'Error in table_service.GetTableEstimate for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
             return self.get_rel_size(quals, columns)
 
@@ -142,27 +154,25 @@ class DASFdw(ForeignDataWrapper):
         log_to_postgres(f'Checking if can sort for table {self.table_id} with sortkeys: {sortkeys}', DEBUG)
 
         grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys)
-        log_to_postgres(f'Converted sortkeys: {grpc_sort_keys}', DEBUG)
 
-
-        request = CanSortRequest(
-            dasId=self.das_id,
-            tableId=self.table_id,
-            sortKeys=grpc_sort_keys
+        request = GetTableSortOrdersRequest(
+            das_id=self.das_id,
+            table_id=self.table_id,
+            sort_keys=grpc_sort_keys
         )
-        log_to_postgres(f'Can sort request: {request}', DEBUG)
+        log_to_postgres(f'GetTableSortOrdersRequest: {request}', DEBUG)
 
         try:
-            response = self.table_service.CanSort(request)
+            response = self.table_service.GetTableSortOrders(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.CanSort for table {self.table_id}: {e}', WARNING)
+            log_to_postgres(f'Error in table_service.GetTableSortOrders for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
             return self.can_sort(sortkeys)
         
         log_to_postgres(f'Can sort: {response} for table {self.table_id}', DEBUG)
 
         out = []
-        for sk in response.sortKeys.sortKeys:
+        for sk in response.sort_keys:
             out.append(SortKey(attname=sk.name, attnum=sk.pos, is_reversed=sk.isReversed, nulls_first=sk.nullsFirst, collate=sk.collate))
         return out
 
@@ -170,24 +180,56 @@ class DASFdw(ForeignDataWrapper):
     def get_path_keys(self):
         log_to_postgres(f'Getting path keys for table {self.table_id}', DEBUG)
 
-        request = GetPathKeysRequest(
-            dasId=self.das_id,
-            tableId=self.table_id
+        request = GetTablePathKeysRequest(
+            das_id=self.das_id,
+            table_id=self.table_id
         )
+        log_to_postgres(f'GetTablePathKeysRequest: {request}', DEBUG)
 
         try:
-            response = self.table_service.GetPathKeys(request)
+            response = self.table_service.GetTablePathKeys(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.GetPathKeys for table {self.table_id}: {e}', WARNING)
+            log_to_postgres(f'Error in table_service.GetTablePathKeys for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
             return self.get_path_keys()
         
-        log_to_postgres(f'Got path keys: {response.pathKeys} for table {self.table_id}', DEBUG)
+        log_to_postgres(f'Got path keys: {response.path_keys} for table {self.table_id}', DEBUG)
 
         out = []
-        for pk in response.pathKeys:
-            out.append((pk.keyColumns, pk.expectedRows))
+        for pk in response.path_keys:
+            out.append((pk.key_columns, pk.expected_rows))
         return out
+
+
+    def explain(self, quals, columns, sortkeys=None, limit=None, verbose=False):
+        log_to_postgres(f'Explaining for table {self.table_id} with quals: {quals}, columns: {columns}, sortkeys: {sortkeys}, limit: {limit}, verbose: {verbose}', DEBUG)
+
+        grpc_quals = multicorn_quals_to_grpc_quals(quals)
+        grpc_columns = columns
+        grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys)
+
+        query = Query(
+            quals=grpc_quals,
+            columns=grpc_columns,
+            sort_keys=grpc_sort_keys,
+            limit=limit
+        )
+
+        # Create an ExecuteRequest message
+        request = ExplainTableRequest(
+            das_id=self.das_id,
+            table_id=self.table_id,
+            query=query
+        )
+
+        # Make the RPC call
+        try:
+            response = self.table_service.ExplainTable(request)
+            return response.stmts
+        except Exception as e:
+            log_to_postgres(f'Error in table_service.Explain for table {self.table_id}: {e}', WARNING)
+            self.__crash_recovery(e)
+            return self.explain(quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
 
 
     def execute(self, quals, columns, sortkeys=None, limit=None, planid=None):
@@ -195,25 +237,31 @@ class DASFdw(ForeignDataWrapper):
 
         grpc_quals = multicorn_quals_to_grpc_quals(quals)
         grpc_columns = columns
+        grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys)
+        grpc_max_batch_size = 4194304
 
-        grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys) if sortkeys else None
-
-        # Create an ExecuteRequest message
-        request = ExecuteRequest(
-            dasId=self.das_id,
-            tableId=self.table_id,
+        query = Query(
             quals=grpc_quals,
             columns=grpc_columns,
-            sortKeys=grpc_sort_keys,
-            limit=limit,
-            planId=str(planid)
+            sort_keys=grpc_sort_keys,
+            limit=limit
         )
+
+        # Create an ExecuteRequest message
+        request = ExecuteTableRequest(
+            das_id=self.das_id,
+            table_id=self.table_id,
+            query=query,
+            plan_id=str(planid),
+            max_batch_size_bytes=grpc_max_batch_size
+        )
+        log_to_postgres(f'ExecuteTableRequest request: {request}', DEBUG)
 
         # Make the RPC call
         try:
-            rows_stream = self.table_service.Execute(request)
+            rows_stream = self.table_service.ExecuteTable(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.Execute for table {self.table_id}: {e}', WARNING)
+            log_to_postgres(f'Error in table_service.ExecuteTable for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
             return self.execute(quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
 
@@ -223,33 +271,38 @@ class DASFdw(ForeignDataWrapper):
     @property
     def modify_batch_size(self):
         log_to_postgres(f'Getting modify batch size {self.table_id}', DEBUG)
-        request = ModifyBatchSizeRequest(
-            dasId=self.das_id,
-            tableId=self.table_id
+
+        request = GetBulkInsertTableSizeRequest(
+            das_id=self.das_id,
+            table_id=self.table_id
         )
+        log_to_postgres(f'GetBulkInsertTableSizeRequest: {request}', DEBUG)
+
         try:
-            response = self.table_service.ModifyBatchSize(request)
+            response = self.table_service.GetBulkInsertTableSize(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.ModifyBatchSize for table {self.table_id}: {e}', WARNING)
+            log_to_postgres(f'Error in table_service.GetBulkInsertTableSize for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
             return self.modify_batch_size
 
         log_to_postgres(f'Got modify batch size: {response.size} for table {self.table_id}', DEBUG)
         return response.size
 
+
     @property
     def rowid_column(self):
         log_to_postgres(f'Getting rowid column for table {self.table_id}', DEBUG)
 
-        request = UniqueColumnRequest(
-            dasId=self.das_id,
-            tableId=self.table_id
+        request = GetTableUniqueColumnRequest(
+            das_id=self.das_id,
+            table_id=self.table_id
         )
+        log_to_postgres(f'GetTableUniqueColumnRequest: {request}', DEBUG)
 
         try:
-            response = self.table_service.UniqueColumn(request)
+            response = self.table_service.GetTableUniqueColumn(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.UniqueColumns for table {self.table_id}: {e}', WARNING)
+            log_to_postgres(f'Error in table_service.GetTableUniqueColumn for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
             return self.rowid_column
 
@@ -262,28 +315,31 @@ class DASFdw(ForeignDataWrapper):
         log_to_postgres(f'Inserting values: {values} into table {self.table_id}', DEBUG)
 
         # Convert the values to RAW values
-        row = {}
+        columns = []
         for name, value in values.items():
-            row[name] = python_value_to_raw(value)
+            columns.append(Column(name=name, data=python_value_to_raw(value)))
 
         # Create an InsertRequest message
-        request = InsertRequest(
-            dasId=self.das_id,
-            tableId=self.table_id,
-            values=Row(data=row)
+        request = InsertTableRequest(
+            das_id=self.das_id,
+            table_id=self.table_id,
+            row=Row(columns=columns)
         )
+        log_to_postgres(f'InsertTableRequest: {request}', DEBUG)
 
         # Make the RPC call
         try:
-            response = self.table_service.Insert(request)
+            response = self.table_service.InsertTable(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.Insert for table {self.table_id}: {e}', WARNING)
+            log_to_postgres(f'Error in table_service.InsertTable for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
             return self.insert(values)
 
         output_row = {}
-        for name, value in response.row.data.items():
-            output_row[name] = raw_value_to_python(value)
+        for col in response.row.columns:
+            name = col.name
+            data = col.data
+            output_row[name] = raw_value_to_python(data)
 
         log_to_postgres(f'Inserted row: {output_row} into table {self.table_id}', DEBUG)
 
@@ -292,57 +348,65 @@ class DASFdw(ForeignDataWrapper):
 
     def bulk_insert(self, all_values):
         log_to_postgres(f'Bulk inserting values: {all_values} into table {self.table_id}', DEBUG)
-        rows = [{name: python_value_to_raw(value) for name, value in row.items()} for row in all_values]
+        rows = []
+        for row in all_values:
+            columns = []
+            for name, value in row.items():
+                columns.append(Column(name=name, data=python_value_to_raw(value)))
+            rows.append(Row(columns=columns))
 
         # Create an InsertRequest message
-        request = BulkInsertRequest(
-            dasId=self.das_id,
-            tableId=self.table_id,
-            values=[Row(data=row) for row in rows]
+        request = BulkInsertTableRequest(
+            das_id=self.das_id,
+            table_id=self.table_id,
+            rows=rows
         )
+        log_to_postgres(f'BulkInsertTableRequest: {request}', DEBUG)
 
         # Make the RPC call
         try:
-            response = self.table_service.BulkInsert(request)
+            response = self.table_service.BulkInsertTable(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.BulkInsert for table {self.table_id}: {e}', WARNING)
+            log_to_postgres(f'Error in table_service.BulkInsertTable for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
             return self.bulk_insert(all_values)
 
-        output_rows = [{name: raw_value_to_python(value) for name, value in row.data.items()} for row in response.rows]
+        output_rows = [{col.name: raw_value_to_python(col.data) for col in row.columns} for row in response.rows]
         log_to_postgres(f'Bulk insert of {len(all_values)} into table {self.table_id} returned row: {output_rows}', DEBUG)
 
         return output_rows
 
     
-
     def update(self, rowid, new_values):
         log_to_postgres(f'Updating rowid: {rowid} with new values: {new_values} in table {self.table_id}', DEBUG)
 
         # Convert the values to RAW values
-        row = {}
+        columns = []
         for name, value in new_values.items():
-            row[name] = python_value_to_raw(value)
+            columns.append(Column(name=name, data=python_value_to_raw(value)))
 
         # Create an UpdateRequest message
-        request = UpdateRequest(
-            dasId=self.das_id,
-            tableId=self.table_id,
-            rowId=python_value_to_raw(rowid),
-            newValues=Row(data=row)
+        request = UpdateTableRequest(
+            das_id=self.das_id,
+            table_id=self.table_id,
+            row_id=python_value_to_raw(rowid),
+            new_row=Row(columns=columns)
         )
+        log_to_postgres(f'UpdateTableRequest: {request}', DEBUG)
 
         # Make the RPC call
         try:
-            response = self.table_service.Update(request)
+            response = self.table_service.UpdateTable(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.Update for table {self.table_id}: {e}', WARNING)
+            log_to_postgres(f'Error in table_service.UpdateTable for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
             return self.update(rowid, new_values)
         
         output_row = {}
-        for name, value in response.row.data.items():
-            output_row[name] = raw_value_to_python(value)
+        for col in response.row.columns:
+            name = col.name
+            data = col.data
+            output_row[name] = raw_value_to_python(data)
         
         log_to_postgres(f'Updated row: {output_row} in table {self.table_id}', DEBUG)
 
@@ -353,17 +417,18 @@ class DASFdw(ForeignDataWrapper):
         log_to_postgres(f'Deleting rowid: {rowid} from table {self.table_id}', DEBUG)
 
         # Create a DeleteRequest message
-        request = DeleteRequest(
-            dasId=self.das_id,
-            tableId=self.table_id,
-            rowId=python_value_to_raw(rowid)
+        request = DeleteTableRequest(
+            das_id=self.das_id,
+            table_id=self.table_id,
+            row_id=python_value_to_raw(rowid)
         )
+        log_to_postgres(f'DeleteTableRequest: {request}', DEBUG)
 
         # Make the RPC call
         try:
-            self.table_service.Delete(request)
+            self.table_service.DeleteTable(request)
         except Exception as e:
-            log_to_postgres(f'Error in table_service.Delete for table {self.table_id}: {e}', WARNING)
+            log_to_postgres(f'Error in table_service.DeleteTable for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
             return self.delete(rowid)
 
@@ -401,131 +466,109 @@ class DASFdw(ForeignDataWrapper):
                 request = RegisterRequest(definition=das_definition)
 
                 try:
-                    das_id = registration_service.Register(request)
+                    response = registration_service.Register(request)
                 except Exception as e:
                     log_to_postgres(f'Error in registration_service.Register: {e}', WARNING)
                     raise e
+
+                if response.error:
+                    raise builtins.ValueError(response.error)
+
+                das_id = response.id
                 log_to_postgres(f'Created new DAS with ID: {das_id.id}', DEBUG)
 
             table_service = TablesServiceStub(channel)
 
             log_to_postgres(f'Getting definitions for DAS ID: {das_id.id}', DEBUG)
-            request = GetDefinitionsRequest(dasId=das_id)
+            request = GetTableDefinitionsRequest(das_id=das_id)
             try:
-                response = table_service.GetDefinitions(request)
+                response = table_service.GetTableDefinitions(request)
             except Exception as e:
-                log_to_postgres(f'Error in table_service.GetDefinitions: {e}', WARNING)
+                log_to_postgres(f'Error in table_service.GetTableDefinitions: {e}', WARNING)
                 raise e
             log_to_postgres(f'Got definitions: {response.definitions}', DEBUG)
 
             table_definitions = []
 
             for table in response.definitions:
+                log_to_postgres(f'About to do {table.table_id.name}', DEBUG)
                 column_definitions = []
 
-                table_name = table.tableId.name
+                table_name = table.table_id.name
                 columns = table.columns
+                log_to_postgres(f'Hello a', DEBUG)
                 for column in columns:
+                    log_to_postgres(f'Hello b {column.name} {column.type}', DEBUG)
                     column_definitions.append(ColumnDefinition(column.name, type_name=raw_type_to_postgresql(column.type)))
                 
+                log_to_postgres(f'Hello c', DEBUG)
                 if 'das_type' in srv_options:
-                    table_options = dict(url=url, das_id=das_id.id, das_table_name=table_name, das_startup_cost=str(table.startupCost), das_type=srv_options['das_type'])
+                    log_to_postgres(f'Hello d', DEBUG)
+                    table_options = dict(url=url, das_id=das_id.id, das_table_name=table_name, das_startup_cost=str(table.startup_cost), das_type=srv_options['das_type'])
                 else:
-                    table_options = dict(url=url, das_id=das_id.id, das_table_name=table_name, das_startup_cost=str(table.startupCost))
+                    log_to_postgres(f'Hello e', DEBUG)
+                    table_options = dict(url=url, das_id=das_id.id, das_table_name=table_name, das_startup_cost=str(table.startup_cost))
 
+                log_to_postgres(f'Hello f', DEBUG)
                 table_definitions.append(TableDefinition(table_name, columns=column_definitions, options=table_options))
+                log_to_postgres(f'Did table {table_name}', DEBUG)
             
+            log_to_postgres(f'Table definitions are {table_definitions}', DEBUG)
+
             return table_definitions
     
 
 def raw_type_to_postgresql(t):
     type_name = t.WhichOneof('type')
-    log_to_postgres(f'raw_type_to_postgresql({type_name}, {t})', DEBUG)
-    if type_name == 'undefined':
-        if t.nullable: return 'TEXT'
-        else: return 'UNKNOWN'
+    if type_name == 'any':
+        return 'JSONB'
     elif type_name == 'byte':
-        assert(t.byte.triable == False, "Triable types are not supported")
         return 'SMALLINT' + (' NULL' if t.byte.nullable else '') # Postgres does not have a BYTE type, so SMALLINT is closest
     elif type_name == 'short':
-        assert(t.short.triable == False, "Triable types are not supported")
         return 'SMALLINT' + (' NULL' if t.short.nullable else '')
     elif type_name == 'int':
-        assert(t.int.triable == False, "Triable types are not supported")
         return 'INTEGER' + (' NULL' if t.int.nullable else '')
     elif type_name == 'long':
-        assert(t.long.triable == False, "Triable types are not supported")
         return 'BIGINT' + (' NULL' if t.long.nullable else '')
     elif type_name == 'float':
-        assert(t.float.triable == False, "Triable types are not supported")
         return 'REAL' + (' NULL' if t.float.nullable else '')
     elif type_name == 'double':
-        assert(t.double.triable == False, "Triable types are not supported")
         return 'DOUBLE PRECISION' + (' NULL' if t.double.nullable else '')
     elif type_name == 'decimal':
-        assert(t.decimal.triable == False, "Triable types are not supported")
         return 'DECIMAL' + (' NULL' if t.decimal.nullable else '')
     elif type_name == 'bool':
-        assert(t.bool.triable == False, "Triable types are not supported")
         return 'BOOLEAN' + (' NULL' if t.bool.nullable else '')
     elif type_name == 'string':
-        assert(t.string.triable == False, "Triable types are not supported")
         return 'TEXT' + (' NULL' if t.string.nullable else '')
     elif type_name == 'binary':
-        assert(t.binary.triable == False, "Triable types are not supported")
         return 'BYTEA' + (' NULL' if t.binary.nullable else '')
     elif type_name == 'date':
-        assert(t.date.triable == False, "Triable types are not supported")
         return 'DATE' + (' NULL' if t.date.nullable else '')
     elif type_name == 'time':
-        assert(t.time.triable == False, "Triable types are not supported")
         return 'TIME' + (' NULL' if t.time.nullable else '')
     elif type_name == 'timestamp':
-        assert(t.timestamp.triable == False, "Triable types are not supported")
         return 'TIMESTAMP' + (' NULL' if t.timestamp.nullable else '')
     elif type_name == 'interval':
-        assert(t.interval.triable == False, "Triable types are not supported")
         return 'INTERVAL' + (' NULL' if t.interval.nullable else '')
     elif type_name == 'record':
-        assert(t.record.triable == False, "Triable types are not supported")
         # Records were initially advertised as HSTORE, which works only for records in
         # which all values are strings. For backward compatibility, we keep that
         # logic.
-        fieldTypes = [f.tipe.WhichOneof('type') for f in t.record.atts]
-        log_to_postgres(f'fieldTypes = {fieldTypes}', DEBUG)
-        if any([fieldType != 'string' for fieldType in fieldTypes]):
+        att_types = [f.tipe.WhichOneof('type') for f in t.record.atts]
+        if any([att_type != 'string' for att_type in att_types]):
             return 'JSONB'
         else:
             return 'HSTORE'
     elif type_name == 'list':
-        assert(t.list.triable == False, "Triable types are not supported")
-        innerType = t.list.innerType
+        inner_type = t.list.inner_type
         # Postgres arrays can always hold NULL values. Their inner type IS nullable.
-        innerTypeStr = raw_type_to_postgresql(innerType)
+        inner_type_str = raw_type_to_postgresql(inner_type)
         # When declaring the array type, the syntax doesn't accept that NULLABLE is specified.
         # We remove ' NULL' if found.
-        if innerTypeStr.endswith(' NULL'):
-            innerTypeStr = innerTypeStr[:-5]
-        columnSchema = f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
-        log_to_postgres(columnSchema, DEBUG)
-        return columnSchema
-
-    elif type_name == 'iterable':
-        assert(t.iterable.triable == False, "Triable types are not supported")
-        innerType = t.iterable.innerType
-        # Postgres arrays can always hold NULL values. Their inner type IS nullable.
-        innerTypeStr = raw_type_to_postgresql(innerType)
-        # When declaring the array type, the syntax doesn't accept that NULLABLE is specified.
-        # We remove ' NULL' if found.
-        if innerTypeStr.endswith(' NULL'):
-            innerTypeStr = innerTypeStr[:-5]
-        columnSchema = f'{innerTypeStr}[]' + (' NULL' if t.list.nullable else '')
-        log_to_postgres(columnSchema, DEBUG)
-        return columnSchema
-    elif type_name == 'binary':
-        return 'BYTEA'
-    elif type_name == 'any':
-        return 'JSONB'
+        if inner_type_str.endswith(' NULL'):
+            inner_type_str = inner_type_str[:-5]
+        column_schema = f'{inner_type_str}[]' + (' NULL' if t.list.nullable else '')
+        return column_schema
     else:
         raise builtins.ValueError(f"Unsupported Type: {type_name}")
 
@@ -568,22 +611,20 @@ def raw_value_to_python(v):
         except builtins.ValueError as exc:
             log_to_postgres(f'Unsupported timestamp: {v.timestamp} {exc}', WARNING)
             return None
-
     elif value_name == 'interval':
         # There is no Python type for intervals, so we return a custom dictionary.
         return {
             'years': v.interval.years,
             'months': v.interval.months,
-            'weeks': v.interval.weeks,
             'days': v.interval.days,
             'hours': v.interval.hours,
             'minutes': v.interval.minutes,
             'seconds': v.interval.seconds,
-            'millis': v.interval.millis
+            'micros': v.interval.micros
         }
     elif value_name == 'record':
         record = {}
-        for f in v.record.fields:
+        for f in v.record.atts:
             record[f.name] = raw_value_to_python(f.value)
         return record
     elif value_name == 'list':
@@ -594,17 +635,39 @@ def raw_value_to_python(v):
 
 def operator_to_grpc_operator(operator):
     if operator == '=':
-        return Operator(equals=Equals())
-    elif operator == '<':
-        return Operator(lessThan=LessThan())
-    elif operator == '>':
-        return Operator(greaterThan=GreaterThan())
-    elif operator == '<=':
-        return Operator(lessThanOrEqual=LessThanOrEqual())
-    elif operator == '>=':
-        return Operator(greaterThanOrEqual=GreaterThanOrEqual())
+        return Operator.EQUALS
     elif operator in ['<>', '!=']:
-        return Operator(notEquals=NotEquals())
+        return Operator.NOT_EQUALS
+    elif operator == '<':
+        return Operator.LESS_THAN
+    elif operator == '<=':
+        return Operator.LESS_THAN_OR_EQUAL
+    elif operator == '>':
+        return Operator.GREATER_THAN
+    elif operator == '>=':
+        return Operator.GREATER_THAN_OR_EQUAL
+    elif operator == 'LIKE':
+        return Operator.LIKE
+    elif operator == 'NOT LIKE':
+        return Operator.NOT_LIKE
+    elif operator == 'ILIKE':
+        return Operator.ILIKE
+    elif operator == 'NOT ILIKE':
+        return Operator.NOT_ILIKE
+    elif operator == '+':
+        return Operator.PLUS
+    elif operator == '-':
+        return Operator.MINUS
+    elif operator == '*':
+        return Operator.TIMES
+    elif operator == '/':
+        return Operator.DIV
+    elif operator == '%':
+        return Operator.MOD
+    elif operator.upper() == 'OR':  # Ensure case-insensitive match
+        return Operator.OR
+    elif operator.upper() == 'AND':  # Ensure case-insensitive match
+        return Operator.AND
     else:
         # Unsupported operator
         return None
@@ -614,8 +677,11 @@ def multicorn_quals_to_grpc_quals(quals):
     grpc_quals = []
     for qual in quals:
         log_to_postgres(f'Processing qual: {qual}', DEBUG)
+        log_to_postgres(f'Processing qual11: {qual}', DEBUG)
         field_name = qual.field_name
+        log_to_postgres(f'Hello 0', DEBUG)
         if qual.is_list_operator:
+            log_to_postgres(f'Hello 1', DEBUG)
             skip = False
             raw_values = []
             for value in qual.value:
@@ -627,24 +693,34 @@ def multicorn_quals_to_grpc_quals(quals):
                 raw_values.append(raw_value)
             if not skip:
                 # All values are supported
-                is_any = qual.list_any_or_all == ANY
-                operator =  operator_to_grpc_operator(qual.operator[0])
-                if not operator:
+                operator = operator_to_grpc_operator(qual.operator[0])
+                if operator is None:
                     log_to_postgres(f'Unsupported operator: {qual.operator[0]}', WARNING)
                     continue
-                grpc_qual = DASListQual(operator=operator, isAny=is_any, values=raw_values)
-                grpc_quals.append(DASQual(fieldName=field_name, listQual=grpc_qual))
+                if qual.list_any_or_all == ANY:
+                    grpc_qual = IsAnyQual(values=raw_values, operator=operator)
+                    grpc_quals.append(DASQual(name=field_name, is_any_qual=grpc_qual))
+                else:
+                    grpc_qual = IsAllQual(values=raw_values, operator=operator)
+                    grpc_quals.append(DASQual(name=field_name, is_all_qual=grpc_qual))
         else:
+            log_to_postgres(f'Hello 2', DEBUG)
             operator = operator_to_grpc_operator(qual.operator)
-            if not operator:
+            log_to_postgres(f'Hello 3', DEBUG)
+            if operator is None:
                 log_to_postgres(f'Unsupported operator: {qual.operator}', WARNING)
                 continue
 
+            log_to_postgres(f'Hello 4', DEBUG)
             raw_value = python_value_to_raw(qual.value)
+            log_to_postgres(f'Hello 5 {raw_value}', DEBUG)
             if raw_value is not None:
                 # Can pushdown this qualifier
+                log_to_postgres(f'Hello 6', DEBUG)
                 grpc_qual = DASSimpleQual(operator=operator, value=raw_value)
-                grpc_quals.append(DASQual(fieldName=field_name, simpleQual=grpc_qual))
+                log_to_postgres(f'Hello 7', DEBUG)
+                grpc_quals.append(DASQual(name=field_name, simple_qual=grpc_qual))
+                log_to_postgres(f'Hello 8', DEBUG)
 
     log_to_postgres(f'Converted quals: {grpc_quals}', DEBUG)
     return grpc_quals
@@ -708,10 +784,10 @@ def python_value_to_raw(v):
             ))
         else:
             # Otherwise, it's a user record
-            fields = []
+            atts = []
             for name, value in v.items():
-                fields.append(ValueRecordField(name=name, value=python_value_to_raw(value)))
-            return Value(record=ValueRecord(fields=fields))
+                atts.append(ValueRecordAttr(name=name, value=python_value_to_raw(value)))
+            return Value(record=ValueRecord(atts=atts))
     elif isinstance(v, list):
         inner_values = []
         for value in v:
@@ -720,6 +796,7 @@ def python_value_to_raw(v):
     else:
         log_to_postgres(f'Unsupported value: {v}', WARNING)
         return None
+    
 
 def multicorn_serialize_as_json(obj):
     def default_serializer(obj):
@@ -738,18 +815,19 @@ def multicorn_serialize_as_json(obj):
 def multicorn_sortkeys_to_grpc_sortkeys(sortkeys):
     grpc_sort_keys_list = []
 
-    for sortkey in sortkeys:
-        log_to_postgres(f'Processing sortkey: {sortkey}', DEBUG)
-        attname = sortkey.attname
-        attnum = sortkey.attnum
-        is_reversed = sortkey.is_reversed
-        nulls_first = sortkey.nulls_first
-        collate = sortkey.collate
-        grpc_sort_key = DASSortKey(name=attname, pos=attnum, isReversed=is_reversed, nullsFirst=nulls_first, collate=collate)
-        grpc_sort_keys_list.append(grpc_sort_key)
+    if sortkeys: # Sortkeys can be None
+        for sortkey in sortkeys:
+            log_to_postgres(f'Processing sortkey: {sortkey}', DEBUG)
+            attname = sortkey.attname
+            attnum = sortkey.attnum
+            is_reversed = sortkey.is_reversed
+            nulls_first = sortkey.nulls_first
+            collate = sortkey.collate
+            grpc_sort_key = DASSortKey(name=attname, pos=attnum, is_reversed=is_reversed, nulls_first=nulls_first, collate=collate)
+            grpc_sort_keys_list.append(grpc_sort_key)
     
     log_to_postgres(f'Converted sortkeys: {grpc_sort_keys_list}', DEBUG)
-    return DASSortKeys(sortKeys=grpc_sort_keys_list)
+    return grpc_sort_keys_list
 
 
 class GrpcStreamIterator:
@@ -801,7 +879,7 @@ class GrpcStreamIterator:
 
                 # Each chunk has multiple rows
                 for row in chunk.rows:
-                    yield build_row(row.data.items())
+                    yield build_row(row)
 
         except GeneratorExit:
             # The generator got force-closed (e.g., if someone forcibly closed
@@ -842,10 +920,6 @@ class GrpcStreamIterator:
         """
         if not self._closed:
             self._closed = True
-            log_to_postgres(
-                f"Cancelling gRPC stream for table {self._table_id}",
-                WARNING
-            )
             try:
                 self._stream.cancel()
             except Exception as e:
@@ -857,13 +931,16 @@ class GrpcStreamIterator:
                 )
 
 
-def build_row(items):
+def build_row(row):
     """
-    Convert the 'row.data.items()' into a standard Python dict.
+    Convert the row into a standard Python dict.
     """
     output_row = {}
-    for name, value in items:
-        output_row[name] = raw_value_to_python(value)
+    for col in row.columns:
+        name = col.name
+        data = col.data
+        log_to_postgres(f'ExecuteTableRequest col {name} data {data}', DEBUG)
+        output_row[name] = raw_value_to_python(data)
     return output_row
 
 

@@ -5,27 +5,29 @@ from setuptools.command.build_py import build_py as _build_py
 from urllib.parse import urlparse
 from pathlib import Path
 import logging
+import shutil
 
 import requests
 
 current_path = os.path.dirname(os.path.realpath(__file__))
 
-RAW_VERSION = "v0.39.0"
+DAS_VERSION = "v1.0.0"
 
-DAS_VERSION = "v0.1.4"
-
-PROTO_FILES = [
-    f"https://raw.githubusercontent.com/raw-labs/snapi/{RAW_VERSION}/protocol-raw/src/main/protobuf/com/rawlabs/protocol/raw/types.proto",
-    f"https://raw.githubusercontent.com/raw-labs/snapi/{RAW_VERSION}/protocol-raw/src/main/protobuf/com/rawlabs/protocol/raw/values.proto",
-    f"https://raw.githubusercontent.com/raw-labs/protocol-das/{DAS_VERSION}/src/main/protobuf/com/rawlabs/protocol/das/das.proto",
-    f"https://raw.githubusercontent.com/raw-labs/protocol-das/{DAS_VERSION}/src/main/protobuf/com/rawlabs/protocol/das/tables.proto",
-    f"https://raw.githubusercontent.com/raw-labs/protocol-das/{DAS_VERSION}/src/main/protobuf/com/rawlabs/protocol/das/functions.proto",
-    f"https://raw.githubusercontent.com/raw-labs/protocol-das/{DAS_VERSION}/src/main/protobuf/com/rawlabs/protocol/das/services/registration_service.proto",
-    f"https://raw.githubusercontent.com/raw-labs/protocol-das/{DAS_VERSION}/src/main/protobuf/com/rawlabs/protocol/das/services/tables_service.proto",
-    f"https://raw.githubusercontent.com/raw-labs/protocol-das/{DAS_VERSION}/src/main/protobuf/com/rawlabs/protocol/das/services/health_service.proto"
+PROTOS = [
+    "com/rawlabs/protocol/das/v1/common/das.proto",
+    "com/rawlabs/protocol/das/v1/common/environment.proto",
+    "com/rawlabs/protocol/das/v1/functions/functions.proto",
+    "com/rawlabs/protocol/das/v1/tables/tables.proto",
+    "com/rawlabs/protocol/das/v1/types/types.proto",
+    "com/rawlabs/protocol/das/v1/types/values.proto",
+    "com/rawlabs/protocol/das/v1/query/quals.proto",
+    "com/rawlabs/protocol/das/v1/query/query.proto",
+    "com/rawlabs/protocol/das/v1/query/operators.proto",
+    "com/rawlabs/protocol/das/v1/services/health_service.proto",
+    "com/rawlabs/protocol/das/v1/services/registration_service.proto",
+    "com/rawlabs/protocol/das/v1/services/tables_service.proto",
+    "com/rawlabs/protocol/das/v1/services/functions_service.proto"
 ]
-
-LOCAL_PROTO_DIR = os.path.join(current_path, "downloaded")
 
 logging.basicConfig(
     filename='setup.log',  # Log to a file (you can change this to stdout if preferred)
@@ -37,28 +39,41 @@ logger = logging.getLogger(__name__)
 
 logger.info(f"Current path: {current_path}")
 
+local_proto_files = os.getenv("LOCAL_PROTO_FILES")
+if local_proto_files:
+    PROTO_FILES = [f"{local_proto_files}/src/main/protobuf/{proto}" for proto in PROTOS]
+else:
+    PROTO_FILES = [f"https://raw.githubusercontent.com/raw-labs/protocol-das/{DAS_VERSION}/src/main/protobuf/{proto}" for proto in PROTOS]
+
+downloaded_proto_dir = os.path.join(current_path, "downloaded")
+
+
 class PrepareGrpcPackages:
     
     def run(self):
-        self.create_local_proto_dir()
+        self.create_downloaded_proto_dir()
         self.download_proto_files()
         self.generate_grpc_code()
         self.add_init_py_to_com_folders()
 
-    def create_local_proto_dir(self):
+    def create_downloaded_proto_dir(self):
         """Ensure the local proto directory exists."""
-        os.makedirs(LOCAL_PROTO_DIR, exist_ok=True)
+        os.makedirs(downloaded_proto_dir, exist_ok=True)
 
     def download_proto_files(self):
         """Download proto files and recreate the directory structure."""
         for proto_file_url in PROTO_FILES:
             local_file_path = self.get_local_file_path(proto_file_url)
-            logger.info(f"Downloading {proto_file_url} to {local_file_path}")
             if not local_file_path:
                 continue
 
             os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
-            self.download_file(proto_file_url, local_file_path)
+            if proto_file_url.startswith("http"):
+                logger.info(f"Downloading {proto_file_url} to {local_file_path}")
+                self.download_file(proto_file_url, local_file_path)
+            else:
+                logger.info(f"Copying {proto_file_url} to {local_file_path}")
+                shutil.copyfile(proto_file_url, local_file_path)
 
     def get_local_file_path(self, proto_file_url):
         """Parse the URL to get the path and filename, and recreate local structure."""
@@ -71,7 +86,7 @@ class PrepareGrpcPackages:
         except ValueError:
             return None
 
-        return os.path.join(LOCAL_PROTO_DIR, *proto_path_parts[com_index:])
+        return os.path.join(downloaded_proto_dir, *proto_path_parts[com_index:])
 
     def download_file(self, url, local_path):
         """Download the file from the given URL and save it locally."""
@@ -93,7 +108,7 @@ class PrepareGrpcPackages:
 
     def find_proto_files(self):
         """Find all .proto files in the local proto directory."""
-        for root, _, files in os.walk(LOCAL_PROTO_DIR):
+        for root, _, files in os.walk(downloaded_proto_dir):
             logger.info(f"Searching for .proto files in {root}")
             for file in files:
                 logger.info(f"Found file: {file}")
@@ -104,9 +119,10 @@ class PrepareGrpcPackages:
         """Run the protoc command to generate Python gRPC code for a given proto file."""
         logger.info(f"Running protoc for {proto_file}")
         try:
+            logger.debug(f"python3 -m grpc_tools.protoc -I={downloaded_proto_dir} --python_out={current_path} --grpc_python_out={current_path} {proto_file}")
             subprocess.run([
                 "python3", "-m", "grpc_tools.protoc",
-                f"-I={LOCAL_PROTO_DIR}",
+                f"-I={downloaded_proto_dir}",
                 f"--python_out={current_path}",
                 f"--grpc_python_out={current_path}",
                 proto_file
@@ -131,7 +147,6 @@ class PrepareGrpcPackages:
             for dir_name in dirs:
                 dir_path = os.path.join(root, dir_name)
                 self.create_init_file(dir_path)
-   
     
     def create_init_file(self, path):
         """Create an __init__.py file in the given path."""
@@ -148,7 +163,20 @@ setup(
     name='multicorn_das',
     use_scm_version=True,  # Automatically use the Git version
     setup_requires=['setuptools_scm'],
-    packages=["com", "com.rawlabs", "com.rawlabs.protocol", "com.rawlabs.protocol.raw", "com.rawlabs.protocol.das", "com.rawlabs.protocol.das.services", "multicorn_das"],
+    packages=[
+        "com",
+        "com.rawlabs",
+        "com.rawlabs.protocol",
+        "com.rawlabs.protocol.das",
+        "com.rawlabs.protocol.das.v1",
+        "com.rawlabs.protocol.das.v1.common",
+        "com.rawlabs.protocol.das.v1.functions",
+        "com.rawlabs.protocol.das.v1.tables",
+        "com.rawlabs.protocol.das.v1.types",
+        "com.rawlabs.protocol.das.v1.query",
+        "com.rawlabs.protocol.das.v1.services",
+        "multicorn_das"
+    ],
     exclude_package_data={
         '': ['licenses/*', 'downloaded/*'],  # Exclude any files in these folders
     },
@@ -164,7 +192,7 @@ setup(
     },
     author='Miguel Branco',
     author_email='miguel@raw-labs.com',
-    description='DAS implementation using Multicorn2',
+    description='DAS implementation using custom fork of Multicorn2',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     url='https://github.com/raw-labs/multicorn-das',
