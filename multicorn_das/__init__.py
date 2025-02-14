@@ -62,7 +62,7 @@ class DASFdw(ForeignDataWrapper):
     # Then, it will re-register the DAS if it was not defined in fdw_options.
     def __crash_recovery(self, e):
 
-        if e.code() == grpc.StatusCode.INVALID_ARGUMENT:
+        if e.code() in [grpc.StatusCode.INVALID_ARGUMENT, grpc.StatusCode.UNIMPLEMENTED]:
             # This is how user visible errors are returned. We raise the exception.
             raise e
 
