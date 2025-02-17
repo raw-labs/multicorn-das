@@ -8,6 +8,7 @@ from decimal import Decimal
 from logging import DEBUG, INFO, WARNING # Never use ERROR or CRITICAL in log_to_post as it relaunches an exception
 
 from com.rawlabs.protocol.das.v1.common.das_pb2 import DASId, DASDefinition
+from com.rawlabs.protocol.das.v1.common.environment_pb2 import Environment
 from com.rawlabs.protocol.das.v1.tables.tables_pb2 import TableId, Row, Column
 from com.rawlabs.protocol.das.v1.types.values_pb2 import Value, ValueNull, ValueByte, ValueShort, ValueInt, ValueFloat, ValueDouble, ValueDecimal, ValueBool, ValueString, ValueBinary, ValueString, ValueDate, ValueTime, ValueTimestamp, ValueInterval, ValueRecord, ValueRecordAttr, ValueList
 from com.rawlabs.protocol.das.v1.query.quals_pb2 import Qual as DASQual, SimpleQual as DASSimpleQual, IsAnyQual, IsAllQual
@@ -201,12 +202,13 @@ class DASFdw(ForeignDataWrapper):
         return out
 
 
-    def explain(self, quals, columns, sortkeys=None, limit=None, verbose=False):
+    def explain(self, env, quals, columns, sortkeys=None, limit=None, verbose=False):
         log_to_postgres(f'Explaining for table {self.table_id} with quals: {quals}, columns: {columns}, sortkeys: {sortkeys}, limit: {limit}, verbose: {verbose}', DEBUG)
 
         grpc_quals = multicorn_quals_to_grpc_quals(quals)
         grpc_columns = columns
         grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys)
+        grpc_env = Environment(env = env) if env is not None else None
 
         query = Query(
             quals=grpc_quals,
@@ -215,11 +217,11 @@ class DASFdw(ForeignDataWrapper):
             limit=limit
         )
 
-        # Create an ExecuteRequest message
         request = ExplainTableRequest(
             das_id=self.das_id,
             table_id=self.table_id,
-            query=query
+            query=query,
+            env=grpc_env
         )
 
         # Make the RPC call
@@ -229,16 +231,17 @@ class DASFdw(ForeignDataWrapper):
         except Exception as e:
             log_to_postgres(f'Error in table_service.Explain for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
-            return self.explain(quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
+            return self.explain(env, quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
 
 
-    def execute(self, quals, columns, sortkeys=None, limit=None, planid=None):
+    def execute(self, env, quals, columns, sortkeys=None, limit=None, planid=None):
         log_to_postgres(f'Executing for table {self.table_id} with quals: {quals}, columns: {columns}, sortkeys: {sortkeys}, limit: {limit}, planid: {planid}', DEBUG)
 
         grpc_quals = multicorn_quals_to_grpc_quals(quals)
         grpc_columns = columns
         grpc_sort_keys = multicorn_sortkeys_to_grpc_sortkeys(sortkeys)
         grpc_max_batch_size = 4194304
+        grpc_env = Environment(env = env) if env is not None else None
 
         query = Query(
             quals=grpc_quals,
@@ -247,14 +250,15 @@ class DASFdw(ForeignDataWrapper):
             limit=limit
         )
 
-        # Create an ExecuteRequest message
         request = ExecuteTableRequest(
             das_id=self.das_id,
             table_id=self.table_id,
             query=query,
             plan_id=str(planid),
-            max_batch_size_bytes=grpc_max_batch_size
+            max_batch_size_bytes=grpc_max_batch_size,
+            env = grpc_env
         )
+
         log_to_postgres(f'ExecuteTableRequest request: {request}', DEBUG)
 
         # Make the RPC call
@@ -263,7 +267,7 @@ class DASFdw(ForeignDataWrapper):
         except Exception as e:
             log_to_postgres(f'Error in table_service.ExecuteTable for table {self.table_id}: {e}', WARNING)
             self.__crash_recovery(e)
-            return self.execute(quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
+            return self.execute(env, quals, columns, sortkeys=sortkeys, limit=limit, planid=planid)
 
         # Iterate over the streamed responses and generate multicorn rows
         return GrpcStreamIterator(self.table_id, rows_stream)
