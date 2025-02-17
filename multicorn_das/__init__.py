@@ -252,7 +252,7 @@ class DASFdw(ForeignDataWrapper):
             das_id=self.das_id,
             table_id=self.table_id,
             query=query,
-            plan_id=str(planid),
+            plan_id=planid,
             max_batch_size_bytes=grpc_max_batch_size
         )
         log_to_postgres(f'ExecuteTableRequest request: {request}', DEBUG)
