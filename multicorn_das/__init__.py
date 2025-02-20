@@ -646,13 +646,13 @@ def operator_to_grpc_operator(operator):
         return Operator.GREATER_THAN
     elif operator == '>=':
         return Operator.GREATER_THAN_OR_EQUAL
-    elif operator == 'LIKE':
+    elif operator == '~~':
         return Operator.LIKE
-    elif operator == 'NOT LIKE':
+    elif operator == '!~~':
         return Operator.NOT_LIKE
-    elif operator == 'ILIKE':
+    elif operator == '~~*':
         return Operator.ILIKE
-    elif operator == 'NOT ILIKE':
+    elif operator == '!~~*':
         return Operator.NOT_ILIKE
     elif operator == '+':
         return Operator.PLUS
