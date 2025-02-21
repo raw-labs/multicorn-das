@@ -173,7 +173,7 @@ class DASFdw(ForeignDataWrapper):
 
         out = []
         for sk in response.sort_keys:
-            out.append(SortKey(attname=sk.name, attnum=sk.pos, is_reversed=sk.isReversed, nulls_first=sk.nullsFirst, collate=sk.collate))
+            out.append(SortKey(attname=sk.name, attnum=sk.pos, is_reversed=sk.is_reversed, nulls_first=sk.nulls_first, collate=sk.collate))
         return out
 
 
