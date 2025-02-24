@@ -91,11 +91,18 @@ class DASFdw(ForeignDataWrapper):
         raise MulticornException("Server unavailable", code=ERROR, detail=json.dumps(error_struct))
 
     @staticmethod
-    def _raise_unauthorized(name, type, url, cause=None):
-        error_struct = {'code': 'UNAUTHORIZED', 'name': name, 'type': type, 'url': url}
+    def _raise_unauthenticated(name, type, url, cause=None):
+        error_struct = {'code': 'UNAUTHENTICATED', 'name': name, 'type': type, 'url': url}
         if cause:
             error_struct['cause'] = str(cause)
-        raise MulticornException("Unauthorized", code=ERROR, detail=json.dumps(error_struct))
+        raise MulticornException("Unauthenticated", code=ERROR, detail=json.dumps(error_struct))
+
+    @staticmethod
+    def _raise_permission_denied(name, type, url, cause=None):
+        error_struct = {'code': 'PERMISSION_DENIED', 'name': name, 'type': type, 'url': url}
+        if cause:
+            error_struct['cause'] = str(cause)
+        raise MulticornException("Permission denied", code=ERROR, detail=json.dumps(error_struct))
 
     @staticmethod
     def _raise_internal_error(message, cause=None):
@@ -142,7 +149,7 @@ class DASFdw(ForeignDataWrapper):
           - If server is UNAVAILABLE, do a health check, re-create channel, and retry
             up to `attempts` times. If fail, raise corresponding exception.
           - If we get NOT_FOUND, call reregister_callback() ONCE, then retry.
-          - If PERMISSION_DENIED, raise unauthorized.
+          - If UNAUTHENTICATION or PERMISSION_DENIED, raise corresponding error.
           - Otherwise, raise a generic internal error.
 
         Parameters:
@@ -202,8 +209,11 @@ class DASFdw(ForeignDataWrapper):
                             cause=e
                         )
 
+                if code == grpc.StatusCode.UNAUTHENTICATED:
+                    DASFdw._raise_unauthenticated(das_name, das_type, das_url, cause=e)
+
                 if code == grpc.StatusCode.PERMISSION_DENIED:
-                    DASFdw._raise_unauthorized(das_name, das_type, das_url, cause=e)
+                    DASFdw._raise_permission_denied(das_name, das_type, das_url, cause=e)
 
                 # Anything else => generic error
                 DASFdw._raise_internal_error("gRPC error calling remote DAS server", cause=e)
