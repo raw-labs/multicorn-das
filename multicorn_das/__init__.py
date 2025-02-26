@@ -723,9 +723,12 @@ def das_type_to_postgresql(t):
     if type_name == 'interval':
         return 'INTERVAL' + (' NULL' if t.short.nullable else '')
     if type_name == 'record':
-        # If record attributes are all strings, we might use HSTORE, else JSONB
+        # Records were originally advertised as HSTORE, which only supports records where all values are strings.
+        # To maintain backward compatibility, we retain this logic when possible.
+        # If the record type has no declared attributes, it implies that it can have any attribute of any type,
+        # so we also declare it as JSONB.
         att_types = [f.tipe.WhichOneof('type') for f in t.record.atts]
-        if any(att_type != 'string' for att_type in att_types):
+        if att_types == [] or any([att_type != 'string' for att_type in att_types]):
             return 'JSONB'
         else:
             return 'HSTORE'
