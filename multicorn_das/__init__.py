@@ -108,6 +108,13 @@ class DASFdw(ForeignDataWrapper):
         raise MulticornException("Permission denied", detail=json.dumps(error_struct))
 
     @staticmethod
+    def _raise_invalid_argument(das_name, das_type, das_url, table_name, cause=None):
+        error_struct = {'code': 'INVALID_ARGUMENT', 'das_name': das_name, 'das_type': das_type, 'das_url': das_url, 'table_name': table_name}
+        if cause:
+            error_struct['cause'] = str(cause)
+        raise MulticornException("Invalid argument", detail=json.dumps(error_struct))
+
+    @staticmethod
     def _raise_internal_error(message, cause=None):
         error_struct = {'code': 'INTERNAL', 'message': message}
         if cause:
@@ -151,7 +158,7 @@ class DASFdw(ForeignDataWrapper):
           - If server is UNAVAILABLE, do a health check, re-create channel, and retry
             up to `attempts` times. If fail, raise corresponding exception.
           - If we get NOT_FOUND, call reregister_callback() ONCE, then retry.
-          - If UNAUTHENTICATION or PERMISSION_DENIED, raise corresponding error.
+          - If UNAUTHENTICATION, PERMISSION_DENIED or INVALID_ARGUMENT, raise corresponding error.
           - Otherwise, raise a generic internal error.
 
         Parameters:
@@ -217,6 +224,9 @@ class DASFdw(ForeignDataWrapper):
 
                 if code == grpc.StatusCode.PERMISSION_DENIED:
                     DASFdw._raise_permission_denied(das_name, das_type, das_url, table_name, cause=e)
+
+                if code == grpc.StatusCode.INVALID_ARGUMENT:
+                    DASFdw._raise_invalid_argument(das_name, das_type, das_url, table_name, cause=e)
 
                 # Anything else => generic error
                 DASFdw._raise_internal_error("gRPC error calling remote DAS server", cause=e)
@@ -1066,6 +1076,8 @@ class GrpcStreamIterator:
                 DASFdw._raise_unauthenticated(self._das_name, self._das_type, self._das_url, self._table_name, cause=e)
             elif code == grpc.StatusCode.PERMISSION_DENIED:
                 DASFdw._raise_permission_denied(self._das_name, self._das_type, self._das_url, self._table_name, cause=e)
+            elif code == grpc.StatusCode.INVALID_ARGUMENT:
+                DASFdw._raise_invalid_argument(self._das_name, self._das_type, self._das_url, self._table_name, cause=e)
             else:
                 # Notably, we do not handle NOT_FOUND here, as that should not happen in a stream.
                 # Instead, we expect it to be handled in a previous call to get_rel_size.
