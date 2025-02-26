@@ -6,6 +6,7 @@ import builtins
 import json
 import grpc
 from datetime import datetime, date, time
+import base64
 from decimal import Decimal
 from logging import ERROR, INFO, DEBUG, WARNING, CRITICAL
 from time import sleep
@@ -1096,3 +1097,22 @@ def build_row(row):
         log_to_postgres(f'ExecuteTableRequest col {name} data {data}', DEBUG)
         output_row[name] = das_value_to_python(data)
     return output_row
+
+# Helper that serializes our Multicorn Python objects as JSON, used when turning
+# such objects into JSONB. The function is called from C code. The resulting string
+# is eventually passed to a Postgres internal function that decodes the JSON and
+# builds a JSONB Datum.
+def multicorn_serialize_as_json(obj):
+     def default_serializer(obj):
+         if isinstance(obj, time):
+             return obj.isoformat()
+         if isinstance(obj, Decimal):
+             return str(obj)
+         if isinstance(obj, date):
+             # `date` also catches `datetime`
+             return obj.isoformat()
+         elif isinstance(obj, bytes):
+             return base64.b64encode(obj).decode('utf-8')
+         else:
+             raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+     return json.dumps(obj, default=default_serializer)
