@@ -115,6 +115,13 @@ class DASFdw(ForeignDataWrapper):
         raise MulticornException("Invalid argument", detail=json.dumps(error_struct))
 
     @staticmethod
+    def _raise_unsupported_operation(message, das_name, das_type, das_url, table_name, cause=None):
+        error_struct = {'code': 'UNSUPPORTED_OPERATION', 'message': message, 'das_name': das_name, 'das_type': das_type, 'das_url': das_url, 'table_name': table_name}
+        if cause:
+            error_struct['cause'] = str(cause)
+        raise MulticornException("Unsupported operation", detail=json.dumps(error_struct))
+
+    @staticmethod
     def _raise_internal_error(message, cause=None):
         error_struct = {'code': 'INTERNAL', 'message': message}
         if cause:
@@ -227,6 +234,9 @@ class DASFdw(ForeignDataWrapper):
 
                 if code == grpc.StatusCode.INVALID_ARGUMENT:
                     DASFdw._raise_invalid_argument(e.details(), das_name, das_type, das_url, table_name, cause=e)
+
+                if code == grpc.StatusCode.UNIMPLEMENTED:
+                    DASFdw._raise_unsupported_operation(e.details(), das_name, das_type, das_url, table_name, cause=e)
 
                 # Anything else => generic error
                 DASFdw._raise_internal_error("gRPC error calling remote DAS server", cause=e)
@@ -1075,6 +1085,8 @@ class GrpcStreamIterator:
             code = e.code()
             if code == grpc.StatusCode.UNAVAILABLE:
                 DASFdw._raise_unavailable(self._das_name, self._das_type, self._das_url, self._table_name, cause=e)
+            elif code == grpc.StatusCode.UNIMPLEMENTED:
+                DASFdw._raise_unsupported_operation(e.details(), self._das_name, self._das_type, self._das_url, self._table_name, cause=e)
             elif code == grpc.StatusCode.UNAUTHENTICATED:
                 DASFdw._raise_unauthenticated(e.details(), self._das_name, self._das_type, self._das_url, self._table_name, cause=e)
             elif code == grpc.StatusCode.PERMISSION_DENIED:
