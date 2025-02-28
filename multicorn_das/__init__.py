@@ -193,17 +193,7 @@ class DASFdw(ForeignDataWrapper):
                 if code == grpc.StatusCode.NOT_FOUND:
                     if allow_reregister and reregister_callback is not None:
                         log_to_postgres('gRPC attempting registration and retry...', WARNING)
-                        try:
-                            reregister_callback()
-                        except Exception as rr_ex:
-                            DASFdw._raise_registration_failed(
-                                "registration failed after unavailability",
-                                das_name=das_name,
-                                das_type=das_type,
-                                das_url=das_url,
-                                table_name=table_name,
-                                cause=rr_ex
-                            )
+                        reregister_callback()
                         allow_reregister = False
                         # Try the call again after re-registration
                         continue
