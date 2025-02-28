@@ -90,45 +90,27 @@ class DASFdw(ForeignDataWrapper):
 
     @staticmethod
     def _raise_unavailable(das_name, das_type, das_url, table_name, cause=None):
-        error_struct = {'code': 'UNAVAILABLE', 'das_name': das_name, 'das_type': das_type, 'das_url': das_url, 'table_name': table_name}
-        if cause:
-            error_struct['cause'] = str(cause)
-        raise MulticornException("Server unavailable", detail=json.dumps(error_struct))
+        return DASFdw._raise_error('UNAVAILABLE', 'Server unavailable', das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
 
     @staticmethod
     def _raise_unauthenticated(message, das_name, das_type, das_url, table_name, cause=None):
-        error_struct = {'code': 'UNAUTHENTICATED', 'message': message, 'das_name': das_name, 'das_type': das_type, 'das_url': das_url, 'table_name': table_name}
-        if cause:
-            error_struct['cause'] = str(cause)
-        raise MulticornException("Unauthenticated", detail=json.dumps(error_struct))
+        return DASFdw._raise_error('UNAUTHENTICATED', message, das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
 
     @staticmethod
     def _raise_permission_denied(message, das_name, das_type, das_url, table_name, cause=None):
-        error_struct = {'code': 'PERMISSION_DENIED', 'message': message, 'das_name': das_name, 'das_type': das_type, 'das_url': das_url, 'table_name': table_name}
-        if cause:
-            error_struct['cause'] = str(cause)
-        raise MulticornException("Permission denied", detail=json.dumps(error_struct))
+        return DASFdw._raise_error('PERMISSION_DENIED', message, das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
 
     @staticmethod
     def _raise_invalid_argument(message, das_name, das_type, das_url, table_name, cause=None):
-        error_struct = {'code': 'INVALID_ARGUMENT', 'message': message, 'das_name': das_name, 'das_type': das_type, 'das_url': das_url, 'table_name': table_name}
-        if cause:
-            error_struct['cause'] = str(cause)
-        raise MulticornException("Invalid argument", detail=json.dumps(error_struct))
+        return DASFdw._raise_error('INVALID_ARGUMENT', message, das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
 
     @staticmethod
     def _raise_unsupported_operation(message, das_name, das_type, das_url, table_name, cause=None):
-        error_struct = {'code': 'UNSUPPORTED_OPERATION', 'message': message, 'das_name': das_name, 'das_type': das_type, 'das_url': das_url, 'table_name': table_name}
-        if cause:
-            error_struct['cause'] = str(cause)
-        raise MulticornException("Unsupported operation", detail=json.dumps(error_struct))
+        return DASFdw._raise_error('UNSUPPORTED_OPERATION', message, das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
 
     @staticmethod
     def _raise_internal_error(message, cause=None):
-        error_struct = {'code': 'INTERNAL', 'message': message}
-        if cause:
-            error_struct['cause'] = str(cause)
-        raise MulticornException("Internal error", detail=json.dumps(error_struct))
+        return DASFdw._raise_error('INTERNAL', message, cause=cause)
 
     # ---------- Re-creating channel & stubs ----------
     def _create_channel_and_stubs(self):
@@ -258,7 +240,7 @@ class DASFdw(ForeignDataWrapper):
                 DASFdw._raise_internal_error("Non-gRPC error calling remote DAS server", cause=ex)
 
         # Should never get here, but just in case:
-        DASFdw._raise_internal_error("Exhausted all attempts in gRPC call loop")
+        DASFdw._raise_internal_error("exhausted all attempts in gRPC call loop")
 
     def _grpc_table_call(self, method_name, request, attempts=30,
                          health_stub=None, recreate_channel_callback=None,
