@@ -80,11 +80,13 @@ class DASFdw(ForeignDataWrapper):
 
     # ---------- Error-raising helpers ----------
     @staticmethod
-    def _raise_registration_failed(message, cause=None):
-        error_struct = {'code': 'REGISTRATION_FAILED', 'message': message}
-        if cause:
-            error_struct['cause'] = str(cause)
-        raise MulticornException("Registration failed", detail=json.dumps(error_struct))
+    def _raise_error(code, message, das_name=None, das_type=None, das_url=None, table_name=None, cause=None):
+        error_struct = {'code': code, 'message': message, 'das_name': das_name, 'das_type': das_type, 'das_url': das_url, 'table_name': table_name, 'cause': str(cause)}
+        raise MulticornException(message, detail=json.dumps(error_struct))
+
+    @staticmethod
+    def _raise_registration_failed(message, das_name, das_type, das_url, table_name=None, cause=None):
+        return DASFdw._raise_error('REGISTRATION_FAILED', message, das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
 
     @staticmethod
     def _raise_unavailable(das_name, das_type, das_url, table_name, cause=None):
@@ -213,7 +215,11 @@ class DASFdw(ForeignDataWrapper):
                             reregister_callback()
                         except Exception as rr_ex:
                             DASFdw._raise_registration_failed(
-                                "Registration failed after unavailability",
+                                "registration failed after unavailability",
+                                das_name=das_name,
+                                das_type=das_type,
+                                das_url=das_url,
+                                table_name=table_name,
                                 cause=rr_ex
                             )
                         allow_reregister = False
@@ -222,7 +228,11 @@ class DASFdw(ForeignDataWrapper):
                     else:
                         # We either have no reregister_callback or we already tried it once
                         DASFdw._raise_registration_failed(
-                            "Registration failed (DAS not found)",
+                            "registration failed (DAS not found)",
+                            das_name=das_name,
+                            das_type=das_type,
+                            das_url=das_url,
+                            table_name=table_name,
                             cause=e
                         )
 
@@ -339,7 +349,7 @@ class DASFdw(ForeignDataWrapper):
         )
 
         if response.error:
-            self._raise_registration_failed(response.error)
+            self._raise_registration_failed(response.error, das_name=self.das_name, das_type=self.das_type, das_url=self.das_url)
 
         log_to_postgres(f'Re-registered DAS with ID: {self.das_id.id}', DEBUG)
 
@@ -614,7 +624,7 @@ class DASFdw(ForeignDataWrapper):
                 das_name,
                 das_type,
                 das_url,
-                '', # We don't have a table name at this point
+                None, # We don't have a table name at this point
                 stub_caller,
                 request,
                 attempts=30,
@@ -626,7 +636,7 @@ class DASFdw(ForeignDataWrapper):
         def reregister_callback():
             # Typically, if we get NOT_FOUND here, we try to register again
             if das_type is None:
-                DASFdw._raise_registration_failed("das_type not in srv_options")
+                DASFdw._raise_registration_failed("das_type not in srv_options", das_name=das_name, das_type=das_type, das_url=das_url)
 
             log_to_postgres(f'Re-registering DAS with type={das_type} ...', WARNING)
             req = RegisterRequest(
@@ -642,7 +652,7 @@ class DASFdw(ForeignDataWrapper):
         else:
             # Must create new DAS
             if das_type is None:
-                DASFdw._raise_registration_failed("das_type is required if das_id not provided")
+                DASFdw._raise_registration_failed("das_type is required if das_id not provided", das_name=das_name, das_type=das_type, das_url=das_url)
 
             log_to_postgres(f'Creating new DAS of type={das_type} ...', DEBUG)
             register_req = RegisterRequest(
@@ -651,7 +661,7 @@ class DASFdw(ForeignDataWrapper):
             register_resp = safe_call("Register", registration_stub, register_req)
 
             if register_resp.error:
-                DASFdw._raise_registration_failed(register_resp.error)
+                DASFdw._raise_registration_failed(register_resp.error, das_name=das_name, das_type=das_type, das_url=das_url)
 
             new_das_id = register_resp.id
             log_to_postgres(f'Created new DAS with ID={new_das_id.id}', DEBUG)
