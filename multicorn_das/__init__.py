@@ -193,17 +193,7 @@ class DASFdw(ForeignDataWrapper):
                 if code == grpc.StatusCode.NOT_FOUND:
                     if allow_reregister and reregister_callback is not None:
                         log_to_postgres('gRPC attempting registration and retry...', WARNING)
-                        try:
-                            reregister_callback()
-                        except Exception as rr_ex:
-                            DASFdw._raise_registration_failed(
-                                "registration failed after unavailability",
-                                das_name=das_name,
-                                das_type=das_type,
-                                das_url=das_url,
-                                table_name=table_name,
-                                cause=rr_ex
-                            )
+                        reregister_callback()
                         allow_reregister = False
                         # Try the call again after re-registration
                         continue
@@ -594,12 +584,13 @@ class DASFdw(ForeignDataWrapper):
 
         recreate_channel()  # initial creation
 
-        def safe_call(method_name, stub, request):
+        def safe_call(method_name, get_stub, request):
             """
             A local function that calls _grpc_call_internal with a lambda referencing
             the *current* stub. If we re-create stubs, it picks up the new one.
             """
             def stub_caller(req):
+                stub = get_stub()
                 return getattr(stub, method_name)(req)
 
             return cls._grpc_call_internal(
@@ -625,7 +616,7 @@ class DASFdw(ForeignDataWrapper):
                 definition=DASDefinition(type=das_type, options={**srv_options, **options}),
                 id=new_das_id
             )
-            safe_call("Register", registration_stub, req)
+            safe_call("Register", lambda: registration_stub, req)
 
         # Check if we already have a DAS ID or not
         if 'das_id' in srv_options:
@@ -640,7 +631,7 @@ class DASFdw(ForeignDataWrapper):
             register_req = RegisterRequest(
                 definition=DASDefinition(type=das_type, options={**srv_options, **options})
             )
-            register_resp = safe_call("Register", registration_stub, register_req)
+            register_resp = safe_call("Register", lambda: registration_stub, register_req)
 
             if register_resp.error:
                 DASFdw._raise_registration_failed(register_resp.error, das_name=das_name, das_type=das_type, das_url=das_url)
@@ -651,7 +642,7 @@ class DASFdw(ForeignDataWrapper):
         # Now get table definitions
         log_to_postgres(f'Getting definitions for DAS ID: {new_das_id.id}', DEBUG)
         request = GetTableDefinitionsRequest(das_id=new_das_id)
-        response = safe_call("GetTableDefinitions", table_stub, request)
+        response = safe_call("GetTableDefinitions", lambda: table_stub, request)
         log_to_postgres(f'Got definitions: {response.definitions}', DEBUG)
 
         table_definitions = []
