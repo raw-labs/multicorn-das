@@ -12,12 +12,13 @@ from logging import ERROR, INFO, DEBUG, WARNING, CRITICAL
 from time import sleep
 
 # Multicorn imports
-from multicorn import ForeignDataWrapper, SortKey, ColumnDefinition, TableDefinition
+from multicorn import ForeignDataWrapper, ForeignFunction, SortKey, ColumnDefinition, TableDefinition
 from multicorn.utils import log_to_postgres, MulticornException
 
 # Protobuf imports
 from com.rawlabs.protocol.das.v1.common.das_pb2 import DASId, DASDefinition
 from com.rawlabs.protocol.das.v1.common.environment_pb2 import Environment
+from com.rawlabs.protocol.das.v1.functions.functions_pb2 import FunctionId
 from com.rawlabs.protocol.das.v1.tables.tables_pb2 import TableId, Row, Column
 from com.rawlabs.protocol.das.v1.types.values_pb2 import (
     Value, ValueNull, ValueByte, ValueShort, ValueInt, ValueFloat, ValueDouble,
@@ -32,6 +33,7 @@ from com.rawlabs.protocol.das.v1.query.quals_pb2 import (
 )
 from com.rawlabs.protocol.das.v1.query.operators_pb2 import Operator
 from com.rawlabs.protocol.das.v1.query.query_pb2 import SortKey as DASSortKey, Query
+from com.rawlabs.protocol.das.v1.services.functions_service_pb2 import GetFunctionDefinitionsRequest, NamedArgument, Argument, ExecuteFunctionRequest
 from com.rawlabs.protocol.das.v1.services.tables_service_pb2 import (
     GetTableDefinitionsRequest, GetTableEstimateRequest, GetTableSortOrdersRequest,
     GetTablePathKeysRequest, ExplainTableRequest, ExecuteTableRequest,
@@ -42,75 +44,73 @@ from com.rawlabs.protocol.das.v1.services.registration_service_pb2 import Regist
 from com.rawlabs.protocol.das.v1.services.health_service_pb2 import HealthCheckRequest
 
 # gRPC stubs
+from com.rawlabs.protocol.das.v1.services.functions_service_pb2_grpc import FunctionsServiceStub
 from com.rawlabs.protocol.das.v1.services.tables_service_pb2_grpc import TablesServiceStub
 from com.rawlabs.protocol.das.v1.services.registration_service_pb2_grpc import RegistrationServiceStub
 from com.rawlabs.protocol.das.v1.services.health_service_pb2_grpc import HealthCheckServiceStub
 
-
-class DASFdw(ForeignDataWrapper):
+class DASBase:
     """
-    A foreign data wrapper for DAS with all gRPC calls.
+    Base class for connecting to and interacting with a DAS gRPC server.
+    Manages the gRPC channel, stubs, and some shared error-handling utilities.
     """
 
-    _startup_cost = 20  # Default cost of starting up the FDW
+    def __init__(self, das_id, das_name, das_type, das_url, resource_name, fdw_options):
+        """
+        Initialize the base with DAS connection info.
 
-    def __init__(self, fdw_options, fdw_columns):
-        super(DASFdw, self).__init__(fdw_options, fdw_columns)
-
-        # For backward compatibility, in case 'das_name' is not defined
-        self.das_name = fdw_options.get('das_name', fdw_options['das_url'])
-        self.das_type = fdw_options.get('das_type', None)
-        self.das_url = fdw_options['das_url']
-        self.das_id = DASId(id=fdw_options['das_id'])
-        self.table_name = fdw_options['das_table_name']
-        self.table_id = TableId(name=fdw_options['das_table_name'])
+        :param das_id: The DAS ID.
+        :param das_name: A user-friendly name or fallback to das_url.
+        :param das_type: The DAS 'type' (can be None if unknown).
+        :param das_url:  The gRPC address (e.g. 'localhost:50051').
+        :param resource_name: A short descriptor for logging (table or function name, etc.).
+        :param fdw_options: Dictionary of FDW or function options (e.g. credentials).
+        """
+        self.das_id = DASId(id=das_id)
+        self.das_name = das_name
+        self.das_type = das_type
+        self.das_url = das_url
+        self.resource_name = resource_name  # e.g. table_name, function_name, or None
         self.fdw_options = fdw_options
 
-        # Set the startup cost for the ForeignDataWrapper
-        self._startup_cost = int(fdw_options.get('das_startup_cost', '20'))
-
-        # Create a gRPC channel and stubs
-        self._create_channel_and_stubs()
-
-        log_to_postgres(
-            f'Initialized DAS with url {self.das_url}, with id: {self.das_id.id}, '
-            f'Table ID: {self.table_id.name}, options: {self.fdw_options}',
-            DEBUG
-        )
+        self.channel = None
+        self.health_service = None
+        self.registration_service = None
 
     # ---------- Error-raising helpers ----------
     @staticmethod
-    def _raise_error(code, message, das_name=None, das_type=None, das_url=None, table_name=None, cause=None):
-        error_struct = {'code': code, 'message': message, 'das_name': das_name, 'das_type': das_type, 'das_url': das_url, 'table_name': table_name, 'cause': str(cause)}
+    def _raise_error(code, message, das_name=None, das_type=None, das_url=None, resource_name=None, cause=None):
+        error_struct = {'code': code, 'message': message, 'das_name': das_name, 'das_type': das_type, 'das_url': das_url, 'resource_name': resource_name, 'cause': str(cause)}
         raise MulticornException(message, detail=json.dumps(error_struct))
 
     @staticmethod
-    def _raise_registration_failed(message, das_name, das_type, das_url, table_name=None, cause=None):
-        return DASFdw._raise_error('REGISTRATION_FAILED', message, das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
+    def _raise_registration_failed(message, das_name, das_type, das_url, resource_name=None, cause=None):
+        return DASBase._raise_error('REGISTRATION_FAILED', message, das_name=das_name, das_type=das_type, das_url=das_url, resource_name=resource_name, cause=cause)
 
     @staticmethod
-    def _raise_unavailable(das_name, das_type, das_url, table_name, cause=None):
-        return DASFdw._raise_error('UNAVAILABLE', 'Server unavailable', das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
+    def _raise_unavailable(das_name, das_type, das_url, resource_name, cause=None):
+        return DASBase._raise_error('UNAVAILABLE', 'Server unavailable', das_name=das_name, das_type=das_type, das_url=das_url, resource_name=resource_name, cause=cause)
 
     @staticmethod
-    def _raise_unauthenticated(message, das_name, das_type, das_url, table_name, cause=None):
-        return DASFdw._raise_error('UNAUTHENTICATED', message, das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
+    def _raise_unauthenticated(message, das_name, das_type, das_url, resource_name, cause=None):
+        return DASBase._raise_error('UNAUTHENTICATED', message, das_name=das_name, das_type=das_type, das_url=das_url, resource_name=resource_name, cause=cause)
 
     @staticmethod
-    def _raise_permission_denied(message, das_name, das_type, das_url, table_name, cause=None):
-        return DASFdw._raise_error('PERMISSION_DENIED', message, das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
+    def _raise_permission_denied(message, das_name, das_type, das_url, resource_name, cause=None):
+        return DASBase._raise_error('PERMISSION_DENIED', message, das_name=das_name, das_type=das_type, das_url=das_url, resource_name=resource_name, cause=cause)
 
     @staticmethod
-    def _raise_invalid_argument(message, das_name, das_type, das_url, table_name, cause=None):
-        return DASFdw._raise_error('INVALID_ARGUMENT', message, das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
+    def _raise_invalid_argument(message, das_name, das_type, das_url, resource_name, cause=None):
+        return DASBase._raise_error('INVALID_ARGUMENT', message, das_name=das_name, das_type=das_type, das_url=das_url, resource_name=resource_name, cause=cause)
 
     @staticmethod
-    def _raise_unsupported_operation(message, das_name, das_type, das_url, table_name, cause=None):
-        return DASFdw._raise_error('UNSUPPORTED_OPERATION', message, das_name=das_name, das_type=das_type, das_url=das_url, table_name=table_name, cause=cause)
+    def _raise_unsupported_operation(message, das_name, das_type, das_url, resource_name, cause=None):
+        return DASBase._raise_error('UNSUPPORTED_OPERATION', message, das_name=das_name, das_type=das_type, das_url=das_url, resource_name=resource_name, cause=cause)
 
     @staticmethod
     def _raise_internal_error(message, cause=None):
-        return DASFdw._raise_error('INTERNAL', message, cause=cause)
+        return DASBase._raise_error('INTERNAL', message, cause=cause)
+
 
     # ---------- Re-creating channel & stubs ----------
     def _create_channel_and_stubs(self):
@@ -121,7 +121,6 @@ class DASFdw(ForeignDataWrapper):
             ('grpc.max_receive_message_length', 4 * 1024 * 1024),
             ('grpc.max_send_message_length', 10 * 1024 * 1024),  # Adjust if needed
         ])
-        self.table_service = TablesServiceStub(self.channel)
         self.health_service = HealthCheckServiceStub(self.channel)
         self.registration_service = RegistrationServiceStub(self.channel)
 
@@ -137,7 +136,7 @@ class DASFdw(ForeignDataWrapper):
         log_to_postgres('Health check succeeded.', DEBUG)
 
     @staticmethod
-    def _grpc_call_internal(das_name, das_type, das_url, table_name,
+    def _grpc_call_internal(das_name, das_type, das_url, resource_name,
                             stub_caller, request, *,
                             attempts=30, health_stub=None,
                             recreate_channel_callback=None,
@@ -176,14 +175,14 @@ class DASFdw(ForeignDataWrapper):
                 if code == grpc.StatusCode.UNAVAILABLE:
                     # Out of attempts?
                     if attempt == attempts:
-                        DASFdw._raise_unavailable(das_name, das_type, das_url, table_name, cause=e)
+                        DASBase._raise_unavailable(das_name, das_type, das_url, resource_name, cause=e)
                     # Sleep, recreate channel, health-check
                     sleep(0.5)
                     if recreate_channel_callback:
                         recreate_channel_callback()
                     if health_stub:
                         try:
-                            DASFdw._health_check(health_stub)
+                            DASBase._health_check(health_stub)
                         except Exception:
                             # If health-check fails, wait a moment longer and keep looping
                             sleep(1)
@@ -197,40 +196,147 @@ class DASFdw(ForeignDataWrapper):
                         allow_reregister = False
                         # Try the call again after re-registration
                         continue
-                    else:
-                        # We either have no reregister_callback or we already tried it once
-                        DASFdw._raise_registration_failed(
-                            "registration failed (DAS not found)",
-                            das_name=das_name,
-                            das_type=das_type,
-                            das_url=das_url,
-                            table_name=table_name,
-                            cause=e
-                        )
+                    # We either have no reregister_callback or we already tried it once
+                    DASBase._raise_registration_failed(
+                        "registration failed (DAS not found)",
+                        das_name=das_name,
+                        das_type=das_type,
+                        das_url=das_url,
+                        resource_name=resource_name,
+                        cause=e
+                    )
 
                 if code == grpc.StatusCode.UNAUTHENTICATED:
-                    DASFdw._raise_unauthenticated(e.details(), das_name, das_type, das_url, table_name, cause=e)
+                    DASBase._raise_unauthenticated(e.details(), das_name, das_type, das_url, resource_name, cause=e)
 
                 if code == grpc.StatusCode.PERMISSION_DENIED:
-                    DASFdw._raise_permission_denied(e.details(), das_name, das_type, das_url, table_name, cause=e)
+                    DASBase._raise_permission_denied(e.details(), das_name, das_type, das_url, resource_name, cause=e)
 
                 if code == grpc.StatusCode.INVALID_ARGUMENT:
-                    DASFdw._raise_invalid_argument(e.details(), das_name, das_type, das_url, table_name, cause=e)
+                    DASBase._raise_invalid_argument(e.details(), das_name, das_type, das_url, resource_name, cause=e)
 
                 if code == grpc.StatusCode.UNIMPLEMENTED:
-                    DASFdw._raise_unsupported_operation(e.details(), das_name, das_type, das_url, table_name, cause=e)
+                    DASBase._raise_unsupported_operation(e.details(), das_name, das_type, das_url, resource_name, cause=e)
 
                 # Anything else => generic error
-                DASFdw._raise_internal_error("gRPC error calling remote DAS server", cause=e)
+                DASBase._raise_internal_error("gRPC error calling remote DAS server", cause=e)
 
             except Exception as ex:
                 log_to_postgres(f"Non-gRPC error calling remote DAS server: {ex}", WARNING)
 
                 # Non-gRPC error
-                DASFdw._raise_internal_error("Non-gRPC error calling remote DAS server", cause=ex)
+                DASBase._raise_internal_error("Non-gRPC error calling remote DAS server", cause=ex)
 
         # Should never get here, but just in case:
-        DASFdw._raise_internal_error("exhausted all attempts in gRPC call loop")
+        DASBase._raise_internal_error("exhausted all attempts in gRPC call loop")
+
+
+    # ---------- Re-registration helper ----------
+    def _maybe_reregister_das(self):
+        """
+        If 'das_type' is in FDW options, re-register the DAS with the same ID using
+        the RegistrationService.
+        """
+        if not self.das_type:
+            log_to_postgres('DAS type not in FDW options; skipping re-registration.', DEBUG)
+            return
+
+        log_to_postgres(f'Re-registering DAS with type: {self.das_type}', DEBUG)
+
+        request = RegisterRequest(
+            definition=DASDefinition(type=self.das_type, options=self.fdw_options),
+            id=self.das_id
+        )
+
+        # Use our new _grpc_registration_call to call "Register" on the registration stub
+        response = self._grpc_registration_call(
+            "Register",
+            request,
+            reregister_callback=None  # prevent recursion
+        )
+
+        if response.error:
+            self._raise_registration_failed(response.error, das_name=self.das_name, das_type=self.das_type, das_url=self.das_url)
+
+        log_to_postgres(f'Re-registered DAS with ID: {self.das_id.id}', DEBUG)
+
+
+    def _grpc_registration_call(self, method_name, request, attempts=30,
+                                health_stub=None, recreate_channel_callback=None,
+                                reregister_callback=None):
+        """
+        Similar convenience wrapper for the registration_service stub.
+        """
+        if health_stub is None:
+            health_stub = self.health_service
+        if recreate_channel_callback is None:
+            recreate_channel_callback = self._create_channel_and_stubs
+        # Usually we don't want to re-register again inside a re-registration call
+        # to avoid an infinite loop. So pass `reregister_callback=None`.
+        # Or you can let it call the same callback, but be careful about loops.
+        if reregister_callback is None:
+            reregister_callback = None
+
+        def stub_caller(req):
+            method = getattr(self.registration_service, method_name)
+            return method(req)
+
+        return self._grpc_call_internal(
+            self.das_name,
+            self.das_type,
+            self.das_url,
+            self.resource_name,
+            stub_caller,
+            request,
+            attempts=attempts,
+            health_stub=health_stub,
+            recreate_channel_callback=recreate_channel_callback,
+            reregister_callback=reregister_callback
+        )
+
+
+
+
+class DASFdw(DASBase, ForeignDataWrapper):
+    """
+    Main FDW class for table-like DAS interaction. Inherits from DASBase for
+    connectivity and from ForeignDataWrapper for Multicorn FDW integration.
+    """
+
+    _startup_cost = 20  # Default cost of starting up the FDW
+
+    def __init__(self, fdw_options, fdw_columns):
+        das_id = fdw_options['das_id']
+        # For backward compatibility, in case 'das_name' is not defined
+        das_name = fdw_options.get('das_name', fdw_options['das_url'])
+        das_type = fdw_options.get('das_type', None)
+        das_url = fdw_options['das_url']
+        table_name = fdw_options['das_table_name']  # resource name for logs
+
+        DASBase.__init__(self, das_id, das_name, das_type, das_url, table_name, fdw_options)
+        ForeignDataWrapper.__init__(self, fdw_options, fdw_columns)
+
+        # Additional FDW init
+        self.table_id = TableId(name=table_name)
+
+        # For backward compatibility
+        self.table_name = table_name
+
+        # e.g. set the startup cost
+        self._startup_cost = int(fdw_options.get('das_startup_cost', '20'))
+
+        # Create channel & stubs, including table_service
+        self._create_channel_and_stubs()
+
+        log_to_postgres(f"Initialized DASFdw with table {self.table_name}, options={fdw_options}", DEBUG)
+
+
+    def _create_channel_and_stubs(self):
+        """
+        Override to also create a TablesServiceStub after the base is set up.
+        """
+        super()._create_channel_and_stubs()
+        self.table_service = TablesServiceStub(self.channel)
 
     def _grpc_table_call(self, method_name, request, attempts=30,
                          health_stub=None, recreate_channel_callback=None,
@@ -295,35 +401,6 @@ class DASFdw(ForeignDataWrapper):
             recreate_channel_callback=recreate_channel_callback,
             reregister_callback=reregister_callback
         )
-
-    # ---------- Re-registration helper ----------
-    def _maybe_reregister_das(self):
-        """
-        If 'das_type' is in FDW options, re-register the DAS with the same ID using
-        the RegistrationService, not the table service.
-        """
-        if not self.das_type:
-            log_to_postgres('DAS type not in FDW options; skipping re-registration.', DEBUG)
-            return
-
-        log_to_postgres(f'Re-registering DAS with type: {self.das_type}', DEBUG)
-
-        request = RegisterRequest(
-            definition=DASDefinition(type=self.das_type, options=self.fdw_options),
-            id=self.das_id
-        )
-
-        # Use our new _grpc_registration_call to call "Register" on the registration stub
-        response = self._grpc_registration_call(
-            "Register",
-            request,
-            reregister_callback=None  # prevent recursion
-        )
-
-        if response.error:
-            self._raise_registration_failed(response.error, das_name=self.das_name, das_type=self.das_type, das_url=self.das_url)
-
-        log_to_postgres(f'Re-registered DAS with ID: {self.das_id.id}', DEBUG)
 
     # ---------- FDW overrides ----------
     def get_rel_size(self, quals, columns):
@@ -558,8 +635,14 @@ class DASFdw(ForeignDataWrapper):
     @classmethod
     def import_schema(cls, schema, srv_options, options, restriction_type, restricts):
         """
-        Example of how to handle import_schema as a classmethod,
-        ensuring we also do not hold onto an old stub method reference.
+        Called when the user does IMPORT FOREIGN SCHEMA. Retrieves table definitions
+        from the remote DAS and returns a list of TableDefinition objects.
+
+        :param schema: The target PostgreSQL schema name.
+        :param srv_options: Server-level options.
+        :param options: Options passed in the IMPORT FOREIGN SCHEMA command.
+        :param restriction_type: (Import all or limit to some tables?)
+        :param restricts: The list of tables to include/exclude if restriction is set.
         """
         das_name = srv_options.get('das_name', srv_options['das_url'])
         das_type = srv_options.get('das_type', None)
@@ -656,7 +739,6 @@ class DASFdw(ForeignDataWrapper):
                 column_definitions.append(
                     ColumnDefinition(column.name, type_name=das_type_to_postgresql(column.type))
                 )
-
             table_options = dict(
                 das_name=das_name,
                 das_type=das_type,
@@ -665,14 +747,132 @@ class DASFdw(ForeignDataWrapper):
                 das_table_name=table_name,
                 das_startup_cost=str(table.startup_cost)
             )
+
             table_definitions.append(
                 TableDefinition(table_name, columns=column_definitions, options=table_options)
             )
             log_to_postgres(f'Processed table {table_name}', DEBUG)
 
-        log_to_postgres(f'Table definitions are {table_definitions}', DEBUG)
         return table_definitions
 
+
+
+class DASFunction(DASBase, ForeignFunction):
+    """
+    DAS implementation of ForeignFunction.
+    """
+
+    def __init__(self, options):
+        """
+        Initialize the function caller with the relevant FDW options (function name, DAS ID, etc.).
+        """
+        das_id = options['das_id']
+        das_name = options.get('das_name', options['das_url'])
+        das_type = options.get('das_type', None)
+        das_url = options['das_url']
+        function_name = options['das_function_name']
+        super().__init__(das_id, das_name, das_type, das_url, function_name, options)
+
+        self.function_name = function_name
+        self.function_id = FunctionId(name=function_name)
+        self._create_channel_and_stubs()
+
+        log_to_postgres(
+            f'Initialized DASFunction with function={function_name}, FDW options={options}',
+            DEBUG
+        )
+
+    def _create_channel_and_stubs(self):
+        """
+        Override to also create the FunctionsServiceStub after the base stubs.
+        """
+        super()._create_channel_and_stubs()
+        # Now create function_service
+        self.function_service = FunctionsServiceStub(self.channel)
+
+    def execute(
+        self,
+        named_args=None,
+        env=None
+    ):
+        """
+        We build an ExecuteFunctionRequest with the named args,
+        send it via gRPC, and convert the result to a Python object.
+        """
+        log_to_postgres(
+            f"Executing function {self.function_name} with args={named_args}, env={env}",
+            DEBUG
+        )
+
+        # 2. Build the list of Argument messages
+        #    - For positional arguments, set argument.arg=Value
+        #    - For named arguments, set argument.named_arg=NamedArgument
+        final_args = []
+
+        if named_args:
+            for key, val in named_args.items():
+                val_msg = python_value_to_das(val)
+                final_args.append(Argument(named_arg=NamedArgument(name=key, value=val_msg)))
+
+        # 3. Build the ExecuteFunctionRequest
+        request = ExecuteFunctionRequest(
+            das_id=self.das_id,
+            function_id=self.function_id,
+            args=final_args
+        )
+        if env is not None:
+            request.env.CopyFrom(Environment(env=env))
+
+        log_to_postgres(f"ExecuteFunctionRequest: {request}", DEBUG)
+
+        # 4. Call the remote function via a gRPC unary RPC
+        #    We reuse our _grpc_function_call, which is analogous to _grpc_table_call
+        response = self._grpc_function_call("ExecuteFunction", request)
+        # or if you have a direct stub, something like:
+        # response = self.functions_service.ExecuteFunction(request)
+
+        log_to_postgres(f"Got ExecuteFunctionResponse: {response}", DEBUG)
+
+        # 5. Convert the output Value to a Python object
+        #    If there's no output or it's empty, you might return None
+        if not response.HasField("output"):
+            log_to_postgres("ExecuteFunction returned an empty output Value.", DEBUG)
+            return None
+
+        python_result = das_value_to_python(response.output)
+        log_to_postgres(f"Converted function output to Python object: {python_result}", DEBUG)
+        return python_result
+
+    def _grpc_function_call(self, method_name, request, attempts=30,
+                         health_stub=None, recreate_channel_callback=None,
+                         reregister_callback=None):
+        """
+        Convenience wrapper that calls `method_name` on self.function_service using the
+        standard `_grpc_call_internal`.
+        """
+        if health_stub is None:
+            health_stub = self.health_service
+        if recreate_channel_callback is None:
+            recreate_channel_callback = self._create_channel_and_stubs
+        if reregister_callback is None:
+            reregister_callback = self._maybe_reregister_das
+
+        def stub_caller(req):
+            method = getattr(self.function_service, method_name)
+            return method(req)
+
+        return self._grpc_call_internal(
+            self.das_name,
+            self.das_type,
+            self.das_url,
+            self.function_name,
+            stub_caller,
+            request,
+            attempts=attempts,
+            health_stub=health_stub,
+            recreate_channel_callback=recreate_channel_callback,
+            reregister_callback=reregister_callback
+        )
 
 #
 # ========== Helper Functions ==========
@@ -692,29 +892,29 @@ def das_type_to_postgresql(t):
     if type_name == 'short':
         return 'SMALLINT' + (' NULL' if t.short.nullable else '')
     if type_name == 'int':
-        return 'INTEGER' + (' NULL' if t.short.nullable else '')
+        return 'INTEGER' + (' NULL' if t.int.nullable else '')
     if type_name == 'long':
-        return 'BIGINT' + (' NULL' if t.short.nullable else '')
+        return 'BIGINT' + (' NULL' if t.long.nullable else '')
     if type_name == 'float':
-        return 'REAL' + (' NULL' if t.short.nullable else '')
+        return 'REAL' + (' NULL' if t.float.nullable else '')
     if type_name == 'double':
-        return 'DOUBLE PRECISION' + (' NULL' if t.short.nullable else '')
+        return 'DOUBLE PRECISION' + (' NULL' if t.double.nullable else '')
     if type_name == 'decimal':
-        return 'DECIMAL' + (' NULL' if t.short.nullable else '')
+        return 'DECIMAL' + (' NULL' if t.decimal.nullable else '')
     if type_name == 'bool':
-        return 'BOOLEAN' + (' NULL' if t.short.nullable else '')
+        return 'BOOLEAN' + (' NULL' if t.bool.nullable else '')
     if type_name == 'string':
-        return 'TEXT' + (' NULL' if t.short.nullable else '')
+        return 'TEXT' + (' NULL' if t.string.nullable else '')
     if type_name == 'binary':
-        return 'BYTEA' + (' NULL' if t.short.nullable else '')
+        return 'BYTEA' + (' NULL' if t.binary.nullable else '')
     if type_name == 'date':
-        return 'DATE' + (' NULL' if t.short.nullable else '')
+        return 'DATE' + (' NULL' if t.date.nullable else '')
     if type_name == 'time':
-        return 'TIME' + (' NULL' if t.short.nullable else '')
+        return 'TIME' + (' NULL' if t.time.nullable else '')
     if type_name == 'timestamp':
-        return 'TIMESTAMP' + (' NULL' if t.short.nullable else '')
+        return 'TIMESTAMP' + (' NULL' if t.timestamp.nullable else '')
     if type_name == 'interval':
-        return 'INTERVAL' + (' NULL' if t.short.nullable else '')
+        return 'INTERVAL' + (' NULL' if t.interval.nullable else '')
     if type_name == 'record':
         # Records were originally advertised as HSTORE, which only supports records where all values are strings.
         # To maintain backward compatibility, we retain this logic when possible.
@@ -722,9 +922,9 @@ def das_type_to_postgresql(t):
         # so we also declare it as JSONB.
         att_types = [f.tipe.WhichOneof('type') for f in t.record.atts]
         if att_types == [] or any([att_type != 'string' for att_type in att_types]):
-            return 'JSONB'
+            return 'JSONB' + (' NULL' if t.record.nullable else '')
         else:
-            return 'HSTORE'
+            return 'HSTORE' + (' NULL' if t.record.nullable else '')
     if type_name == 'list':
         inner_type = t.list.inner_type
         # Postgres arrays can always hold NULL values. Their inner type IS nullable.
@@ -736,7 +936,7 @@ def das_type_to_postgresql(t):
         column_schema = f'{inner_type_str}[]' + (' NULL' if t.list.nullable else '')
         return column_schema
 
-    raise builtins.ValueError(f"Unsupported DAS type: {type_name}")
+    raise ValueError(f"Unsupported DAS type: {type_name}")
 
 
 def das_value_to_python(v):
@@ -744,7 +944,10 @@ def das_value_to_python(v):
     Convert a DAS Value protobuf to a Python object.
     """
     value_name = v.WhichOneof('value')
-    if value_name == 'null':
+    # 'null' is obtained when the value was explicitly set to a null value.
+    # if the value wasn't set at all, `v` won't be None, instead it's an
+    # object which .WhichOneof returns a Python None.
+    if value_name == 'null' or value_name is None:
         return None
     if value_name == 'byte':
         return v.byte.v
@@ -795,15 +998,28 @@ def das_value_to_python(v):
             log_to_postgres(f'Unsupported timestamp: {v.timestamp} {exc}', WARNING)
             return None
     if value_name == 'interval':
-        return {
-            'years': v.interval.years,
-            'months': v.interval.months,
-            'days': v.interval.days,
-            'hours': v.interval.hours,
-            'minutes': v.interval.minutes,
-            'seconds': v.interval.seconds,
-            'micros': v.interval.micros
-        }
+        # convert the interval into an ISO 8601 duration string.
+
+        years   = v.interval.years
+        months  = v.interval.months
+        days    = v.interval.days
+        hours   = v.interval.hours
+        minutes = v.interval.minutes
+        seconds = v.interval.seconds
+        micros  = v.interval.micros
+        
+        # Combine seconds and micros into a single floating-point number
+        total_seconds = seconds + micros / 1e6
+
+        # Format the seconds value to 6 decimal places,
+        # then remove trailing zeros and an orphaned decimal point.
+        sec_str = f"{total_seconds:.6f}".rstrip('0').rstrip('.')
+        # If the seconds part becomes empty (i.e. total_seconds was 0), set it to "0"
+        if not sec_str:
+            sec_str = "0"
+        # Build the ISO 8601 duration string.
+        iso_duration = f"P{years}Y{months}M{days}DT{hours}H{minutes}M{sec_str}S"
+        return iso_duration
     if value_name == 'record':
         record_dict = {}
         for f in v.record.atts:
@@ -812,7 +1028,7 @@ def das_value_to_python(v):
     if value_name == 'list':
         return [das_value_to_python(i) for i in v.list.values]
 
-    raise builtins.ValueError(f"Unsupported DAS value: {value_name}")
+    raise ValueError(f"Unsupported DAS value: {value_name}")
 
 
 def python_value_to_das(v):
@@ -1113,16 +1329,18 @@ def build_row(row):
 # is eventually passed to a Postgres internal function that decodes the JSON and
 # builds a JSONB Datum.
 def multicorn_serialize_as_json(obj):
-     def default_serializer(obj):
-         if isinstance(obj, time):
-             return obj.isoformat()
-         if isinstance(obj, Decimal):
-             return str(obj)
-         if isinstance(obj, date):
-             # `date` also catches `datetime`
-             return obj.isoformat()
-         elif isinstance(obj, bytes):
-             return base64.b64encode(obj).decode('utf-8')
-         else:
-             raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-     return json.dumps(obj, default=default_serializer)
+    def default_serializer(obj):
+        if isinstance(obj, time):
+            return obj.isoformat()
+        if isinstance(obj, Decimal):
+            return str(obj)
+        if isinstance(obj, date):
+            # `date` also catches `datetime`
+            return obj.isoformat()
+        if isinstance(obj, bytes):
+            return base64.b64encode(obj).decode('utf-8')
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+    return json.dumps(obj, default=default_serializer)
+
+
+
