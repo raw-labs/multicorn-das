@@ -465,13 +465,17 @@ class DASFdw(DASBase, ForeignDataWrapper):
             out.append((pk.key_columns, pk.expected_rows))
         return out
 
-    def explain(self, env, quals, columns, sortkeys=None, limit=None, verbose=False):
+    def explain(self, quals, columns, sortkeys=None, limit=None, verbose=False, scopes=None, http_headers=None):
         log_to_postgres(
             f'Explaining for table {self.table_id} with quals: {quals}, columns: {columns}, '
             f'sortkeys: {sortkeys}, limit: {limit}, verbose: {verbose}',
             DEBUG
         )
 
+        env = Environment(
+            scopes = scopes if scopes is not None else [],
+            http_headers = http_headers if http_headers is not None else {}
+        )
         request = ExplainTableRequest(
             das_id=self.das_id,
             table_id=self.table_id,
@@ -481,20 +485,24 @@ class DASFdw(DASBase, ForeignDataWrapper):
                 sort_keys=multicorn_sortkeys_to_grpc_sortkeys(sortkeys),
                 limit=limit
             ),
-            env=Environment(env = env) if env is not None else None
+            env=env
         )
         log_to_postgres(f'ExplainTableRequest: {request}', DEBUG)
 
         response = self._grpc_table_call("ExplainTable", request)
         return response.stmts
 
-    def execute(self, env, quals, columns, sortkeys=None, limit=None, planid=None):
+    def execute(self, quals, columns, sortkeys=None, limit=None, planid=None, scopes=None, http_headers=None):
         log_to_postgres(
             f'Executing for table {self.table_id} with quals: {quals}, columns: {columns}, '
             f'sortkeys: {sortkeys}, limit: {limit}, planid: {planid}',
             DEBUG
         )
 
+        env = Environment(
+            scopes = scopes if scopes is not None else [],
+            http_headers = http_headers if http_headers is not None else {}
+        )
         request = ExecuteTableRequest(
             das_id=self.das_id,
             table_id=self.table_id,
@@ -506,7 +514,7 @@ class DASFdw(DASBase, ForeignDataWrapper):
             ),
             plan_id=str(planid),
             max_batch_size_bytes=4 * 1024 * 1024,
-            env = Environment(env = env) if env is not None else None
+            env = env
         )
 
         log_to_postgres(f'ExecuteTableRequest request: {request}', DEBUG)
@@ -793,7 +801,8 @@ class DASFunction(DASBase, ForeignFunction):
     def execute(
         self,
         named_args=None,
-        env=None
+        scopes=None,
+        http_headers=None
     ):
         """
         We build an ExecuteFunctionRequest with the named args,
@@ -814,11 +823,17 @@ class DASFunction(DASBase, ForeignFunction):
                 val_msg = python_value_to_das(val)
                 final_args.append(Argument(named_arg=NamedArgument(name=key, value=val_msg)))
 
+        env = Environment(
+            scopes = scopes if scopes is not None else [],
+            http_headers = http_headers if http_headers is not None else {}
+        )
+
         # 3. Build the ExecuteFunctionRequest
         request = ExecuteFunctionRequest(
             das_id=self.das_id,
             function_id=self.function_id,
-            args=final_args
+            args=final_args,
+            env=env
         )
         if env is not None:
             request.env.CopyFrom(Environment(env=env))
