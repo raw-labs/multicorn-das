@@ -181,7 +181,7 @@ setup(
         '': ['licenses/*', 'downloaded/*'],  # Exclude any files in these folders
     },
     install_requires=[
-        'protobuf',
+        'protobuf==5.29.4', # protobuf runtime that matches the grpcio-tools dependency
         'googleapis-common-protos',
         'grpcio'
     ],

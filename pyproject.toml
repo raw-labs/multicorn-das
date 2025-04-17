@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel", "requests", "grpcio-tools"]
+requires = ["setuptools", "wheel", "requests", "grpcio-tools==1.71.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
