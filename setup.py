@@ -11,7 +11,7 @@ import requests
 
 current_path = os.path.dirname(os.path.realpath(__file__))
 
-DAS_VERSION = "RD-15492-add-http-headers-and-scopes-to-protocol-das"
+DAS_VERSION = "v1.1.0"
 
 PROTOS = [
     "com/rawlabs/protocol/das/v1/common/das.proto",
