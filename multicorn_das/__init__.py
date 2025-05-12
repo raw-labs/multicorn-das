@@ -809,7 +809,7 @@ class DASFunction(DASBase, ForeignFunction):
         send it via gRPC, and convert the result to a Python object.
         """
         log_to_postgres(
-            f"Executing function {self.function_name} with args={named_args}, env={env}",
+            f"Executing function {self.function_name} with args={named_args}",
             DEBUG
         )
 
@@ -835,9 +835,6 @@ class DASFunction(DASBase, ForeignFunction):
             args=final_args,
             env=env
         )
-        if env is not None:
-            request.env.CopyFrom(Environment(env=env))
-
         log_to_postgres(f"ExecuteFunctionRequest: {request}", DEBUG)
 
         # 4. Call the remote function via a gRPC unary RPC
